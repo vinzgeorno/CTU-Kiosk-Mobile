@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/ticket.dart';
-import '../services/supabase_service.dart';
 
 class TicketValidationDialog extends StatefulWidget {
   final Ticket ticket;
@@ -13,36 +12,6 @@ class TicketValidationDialog extends StatefulWidget {
 }
 
 class _TicketValidationDialogState extends State<TicketValidationDialog> {
-  final SupabaseService _supabaseService = SupabaseService();
-  bool _isInvalidating = false;
-
-  Future<void> _invalidateTicket() async {
-    setState(() => _isInvalidating = true);
-
-    final success = await _supabaseService.invalidateTicket(
-      widget.ticket.referenceNumber,
-    );
-
-    if (!mounted) return;
-
-    if (success) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Ticket marked as used'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } else {
-      setState(() => _isInvalidating = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to update ticket'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,11 +44,32 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
 
             // Status Text
             Text(
-              isValid ? 'Valid Ticket' : 'Invalid Ticket',
+              isValid ? 'Valid Ticket' : widget.ticket.isExpired ? 'Expired Ticket' : 'Invalid Ticket',
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
                 color: isValid ? Colors.green : Colors.red,
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Expiry Status
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isValid ? Colors.green.shade50 : Colors.red.shade50,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isValid ? Colors.green.shade200 : Colors.red.shade200,
+                  width: 1,
+                ),
+              ),
+              child: Text(
+                widget.ticket.expiryStatus,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isValid ? Colors.green.shade700 : Colors.red.shade700,
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -98,84 +88,84 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
                     widget.ticket.referenceNumber,
                     Icons.confirmation_number,
                   ),
-                  if (widget.ticket.facility != null) ...[
+                  const Divider(height: 24),
+                  _buildDetailRow(
+                    'Name',
+                    widget.ticket.name,
+                    Icons.person,
+                  ),
+                  if (widget.ticket.age != null) ...[
                     const Divider(height: 24),
                     _buildDetailRow(
-                      'Facility',
-                      widget.ticket.facility!,
-                      Icons.location_on,
-                    ),
-                  ],
-                  if (widget.ticket.amount != null) ...[
-                    const Divider(height: 24),
-                    _buildDetailRow(
-                      'Amount',
-                      '₱${widget.ticket.amount!.toStringAsFixed(2)}',
-                      Icons.payments,
-                    ),
-                  ],
-                  if (widget.ticket.visitDate != null) ...[
-                    const Divider(height: 24),
-                    _buildDetailRow(
-                      'Visit Date',
-                      dateFormat.format(widget.ticket.visitDate!),
-                      Icons.calendar_today,
+                      'Age',
+                      '${widget.ticket.age} years old',
+                      Icons.cake,
                     ),
                   ],
                   const Divider(height: 24),
                   _buildDetailRow(
-                    'Created',
-                    dateFormat.format(widget.ticket.createdAt),
-                    Icons.access_time,
+                    'Facility',
+                    widget.ticket.facility,
+                    Icons.location_on,
+                  ),
+                  const Divider(height: 24),
+                  _buildDetailRow(
+                    'Amount Paid',
+                    '₱${widget.ticket.paymentAmount.toStringAsFixed(2)}',
+                    Icons.payments,
+                  ),
+                  if (widget.ticket.hasDiscount && widget.ticket.originalPrice != null) ...[
+                    const Divider(height: 24),
+                    _buildDetailRow(
+                      'Original Price',
+                      '₱${widget.ticket.originalPrice!.toStringAsFixed(2)}',
+                      Icons.discount,
+                    ),
+                  ],
+                  const Divider(height: 24),
+                  _buildDetailRow(
+                    'Date Created',
+                    dateFormat.format(widget.ticket.dateCreated),
+                    Icons.calendar_today,
+                  ),
+                  const Divider(height: 24),
+                  _buildDetailRow(
+                    'Expiry Date',
+                    dateFormat.format(widget.ticket.dateExpiry),
+                    Icons.event_busy,
+                  ),
+                  const Divider(height: 24),
+                  _buildDetailRow(
+                    'Status',
+                    widget.ticket.transactionStatus.toUpperCase(),
+                    Icons.info,
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 24),
 
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isInvalidating
-                        ? null
-                        : () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Close'),
+            // Action Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isValid ? Colors.green : Colors.grey,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                if (isValid) ...[
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isInvalidating ? null : _invalidateTicket,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: _isInvalidating
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Mark as Used'),
-                    ),
+                child: Text(
+                  isValid ? 'Accept & Close' : 'Close',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
-                ],
-              ],
+                ),
+              ),
             ),
           ],
         ),

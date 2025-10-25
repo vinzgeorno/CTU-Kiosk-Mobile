@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/supabase_service.dart';
@@ -29,20 +30,33 @@ class _ScannerScreenState extends State<ScannerScreen> {
     setState(() => _isProcessing = true);
 
     try {
+      debugPrint('Validating ticket: $referenceNumber');
       final ticket = await _supabaseService.validateTicket(referenceNumber);
       
       if (!mounted) return;
 
       if (ticket != null) {
+        debugPrint('Ticket found: ${ticket.referenceNumber}');
+        debugPrint('  - Name: ${ticket.name}');
+        debugPrint('  - Facility: ${ticket.facility}');
+        debugPrint('  - Amount: ₱${ticket.paymentAmount}');
+        debugPrint('  - Status: ${ticket.transactionStatus}');
+        debugPrint('  - Expiry: ${ticket.dateExpiry}');
+        debugPrint('  - Is Valid: ${ticket.isValid}');
+        debugPrint('  - Is Expired: ${ticket.isExpired}');
+        debugPrint('  - Expiry Status: ${ticket.expiryStatus}');
+        
         await showDialog(
           context: context,
           builder: (context) => TicketValidationDialog(ticket: ticket),
         );
       } else {
+        debugPrint('Ticket not found: $referenceNumber');
         _showErrorDialog('Ticket Not Found', 
             'No ticket found with reference number: $referenceNumber');
       }
     } catch (e) {
+      debugPrint('Error validating ticket: $e');
       if (!mounted) return;
       _showErrorDialog('Error', 'Failed to validate ticket: $e');
     } finally {

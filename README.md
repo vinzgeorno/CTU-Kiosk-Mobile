@@ -1,18 +1,25 @@
-# CTU Kiosk Mobile - Admin Application
+# CTU Kiosk Mobile - Ticket Checker Application
 
-A Flutter-based administrator application for CTU Kiosk system with QR scanning, ticket validation, and data visualization capabilities.
+A Flutter-based ticket validation and monitoring application for CTU Kiosk system. This app provides **read-only** access to check ticket validity and view analytics.
 
 ## Features
 
-- **QR Code Scanner**: Scan ticket QR codes for instant validation
+- **QR Code Scanner**: Scan ticket QR codes for instant validation check
 - **Manual Reference Checker**: Input ticket reference numbers manually
-- **Ticket Validation**: Real-time validation against Supabase database
+- **Expiry-Based Validation**: Automatically checks if tickets are still valid based on expiry date
+  - Tickets are validated when created in the system
+  - App checks validity by comparing current time with `date_expiry`
+  - No database modifications - read-only checker
 - **Dashboard Analytics**: 
   - Payment summaries (Today, Week, Month)
   - Visitor statistics
   - Facility-wise breakdowns
   - Interactive charts and visualizations
 - **Modern UI**: Clean, fast, and intuitive interface
+
+## Important Note
+
+This app is a **read-only ticket checker**. It does not modify any data in the database. Tickets are validated and assigned expiry dates when they are created in the system. This app simply checks if a ticket is still within its valid period.
 
 ## Prerequisites
 
@@ -86,13 +93,18 @@ lib/
 1. Point camera at QR code to scan automatically
 2. Or manually enter reference number in the text field
 3. View validation results with ticket details
-4. Mark tickets as used when validated
+4. Check expiry status:
+   - **Valid**: Green checkmark + time remaining (e.g., "Valid for 2 more days")
+   - **Expired**: Red X + time since expiry (e.g., "Expired 3 hours ago")
+   - **Invalid**: Red X for tickets with invalid status
 
 ### Dashboard Tab
 1. View real-time payment and visitor statistics
 2. Analyze data by time periods (Today, Week, Month)
 3. See facility-wise breakdowns in charts
 4. Pull down to refresh data
+
+**Note**: All operations are read-only. The app does not modify any ticket data.
 
 ## Dependencies
 

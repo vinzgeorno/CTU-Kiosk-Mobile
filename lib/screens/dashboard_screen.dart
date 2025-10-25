@@ -25,6 +25,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _loadDashboardData() async {
     setState(() => _isLoading = true);
     try {
+      // Test connection first
+      final isConnected = await _supabaseService.testConnection();
+      if (!isConnected) {
+        throw Exception('Failed to connect to Supabase database');
+      }
+
       final stats = await _supabaseService.getDashboardStats();
       setState(() {
         _stats = stats;
@@ -34,7 +40,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e')),
+          SnackBar(
+            content: Text('Error loading data: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _loadDashboardData,
+            ),
+          ),
         );
       }
     }
