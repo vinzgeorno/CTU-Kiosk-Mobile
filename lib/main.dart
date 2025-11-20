@@ -1,17 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'config/supabase_config.dart';
+import 'config/app_theme.dart';
+import 'screens/splash_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/scanner_screen.dart';
+import 'services/local_database_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Initialize Supabase
   await Supabase.initialize(
     url: SupabaseConfig.supabaseUrl,
     anonKey: SupabaseConfig.supabaseAnonKey,
   );
+  
+  // Initialize local database
+  final localDb = LocalDatabaseService();
+  await localDb.initialize();
+  
+  // Initial sync from Supabase
+  try {
+    await localDb.syncFromSupabase(force: true);
+  } catch (e) {
+    debugPrint('Initial sync failed: $e');
+  }
   
   runApp(const MyApp());
 }
@@ -24,31 +38,12 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'CTU Kiosk Admin',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.light,
-        ),
-        textTheme: GoogleFonts.interTextTheme(),
-        useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
-        ),
-        cardTheme: CardThemeData(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            elevation: 2,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          ),
-        ),
-      ),
-      home: const MainScreen(),
+      theme: AppTheme.lightTheme(),
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const SplashScreen(),
+        '/main': (context) => const MainScreen(),
+      },
     );
   }
 }

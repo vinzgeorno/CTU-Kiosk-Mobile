@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../services/supabase_service.dart';
+import '../services/local_database_service.dart';
 import '../models/dashboard_stats.dart';
+import 'tickets_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -11,29 +13,78 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
+  final LocalDatabaseService _localDb = LocalDatabaseService();
   DashboardStats? _stats;
+  int _ticketCount = 0;
   bool _isLoading = true;
+  late TabController _tabController;
+  int _selectedPeriod = 0; // 0: Today, 1: This Week, 2: This Month
+  int _selectedMonth = DateTime.now().month; // 1-12 for month selection
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() {
+          _selectedPeriod = _tabController.index;
+        });
+      }
+    });
     _loadDashboardData();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDashboardData() async {
     setState(() => _isLoading = true);
     try {
-      // Test connection first
       final isConnected = await _supabaseService.testConnection();
       if (!isConnected) {
         throw Exception('Failed to connect to Supabase database');
       }
 
-      final stats = await _supabaseService.getDashboardStats();
+      // Load stats based on selected month for "This Month" tab
+      DateTime? monthFilter;
+      if (_selectedPeriod == 2) {
+        final now = DateTime.now();
+        monthFilter = DateTime(now.year, _selectedMonth, 1);
+      }
+
+      // Sync from Supabase
+      await _localDb.syncFromSupabase();
+      
+      // Get stats from Supabase
+      final stats = await _supabaseService.getDashboardStats(selectedMonth: monthFilter);
+      
+      // Get ticket count from local DB
+      int count = 0;
+      switch (_selectedPeriod) {
+        case 0:
+          final tickets = await _localDb.getTodayTickets();
+          count = tickets.length;
+          break;
+        case 1:
+          final tickets = await _localDb.getWeekTickets();
+          count = tickets.length;
+          break;
+        case 2:
+          final now = DateTime.now();
+          final tickets = await _localDb.getMonthTickets(now.year, _selectedMonth);
+          count = tickets.length;
+          break;
+      }
+      
       setState(() {
         _stats = stats;
+        _ticketCount = count;
         _isLoading = false;
       });
     } catch (e) {
@@ -55,294 +106,322 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _showAppGuide() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.help_outline, color: Colors.blue.shade700),
+            const SizedBox(width: 12),
+            const Text('App Guide'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildGuideItem(
+                '📊 Dashboard',
+                'View payment and visitor statistics. Switch between Today, This Week, and This Month tabs.',
+              ),
+              const SizedBox(height: 16),
+              _buildGuideItem(
+                '📅 Month Selection',
+                'In "This Month" tab, select any of the 12 months to view historical data.',
+              ),
+              const SizedBox(height: 16),
+              _buildGuideItem(
+                '🎫 Ticket Records',
+                'Scroll down to see all ticket records with details like reference number, facility, and amount.',
+              ),
+              const SizedBox(height: 16),
+              _buildGuideItem(
+                '📱 Scanner',
+                'Tap the Scanner tab to scan QR codes or manually enter ticket reference numbers.',
+              ),
+              const SizedBox(height: 16),
+              _buildGuideItem(
+                '🔄 Refresh',
+                'Pull down to refresh data or tap the refresh icon.',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Got it!'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGuideItem(String title, String description) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          description,
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.grey.shade700,
+            height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         title: const Text('Dashboard'),
         elevation: 0,
+        backgroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.help_outline_rounded),
+            onPressed: _showAppGuide,
+            tooltip: 'Help',
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
             onPressed: _loadDashboardData,
+            tooltip: 'Refresh',
           ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadDashboardData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Payment Summary Cards
-                    Text(
-                      'Payment Summary',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+          : Column(
+              children: [
+                // Tab Bar
+                Container(
+                  color: Colors.white,
+                  child: TabBar(
+                    controller: _tabController,
+                    labelColor: Colors.blue.shade700,
+                    unselectedLabelColor: Colors.grey.shade600,
+                    indicatorColor: Colors.blue.shade700,
+                    indicatorWeight: 3,
+                    labelStyle: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
                     ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildStatCard(
-                            'Today',
-                            '₱${NumberFormat('#,##0.00').format(_stats?.totalPaymentToday ?? 0)}',
-                            Icons.today,
-                            Colors.blue,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildStatCard(
-                            'This Week',
-                            '₱${NumberFormat('#,##0.00').format(_stats?.totalPaymentWeek ?? 0)}',
-                            Icons.calendar_view_week,
-                            Colors.green,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildStatCard(
-                      'This Month',
-                      '₱${NumberFormat('#,##0.00').format(_stats?.totalPaymentMonth ?? 0)}',
-                      Icons.calendar_month,
-                      Colors.purple,
-                      isWide: true,
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Visitors Summary Cards
-                    Text(
-                      'Visitors Summary',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildStatCard(
-                            'Today',
-                            '${_stats?.visitorsToday ?? 0}',
-                            Icons.person,
-                            Colors.orange,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _buildStatCard(
-                            'This Week',
-                            '${_stats?.visitorsWeek ?? 0}',
-                            Icons.people,
-                            Colors.teal,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildStatCard(
-                      'This Month',
-                      '${_stats?.visitorsMonth ?? 0}',
-                      Icons.groups,
-                      Colors.indigo,
-                      isWide: true,
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Visitors by Facility Chart
-                    if (_stats?.visitorsByFacility.isNotEmpty ?? false) ...[
-                      Text(
-                        'Visitors by Facility',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          children: [
-                            SizedBox(
-                              height: 200,
-                              child: PieChart(
-                                PieChartData(
-                                  sections: _buildPieChartSections(
-                                    _stats!.visitorsByFacility,
+                    tabs: const [
+                      Tab(text: 'Today'),
+                      Tab(text: 'This Week'),
+                      Tab(text: 'This Month'),
+                    ],
+                  ),
+                ),
+                
+                // Content
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _loadDashboardData,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Month Selector (only show for "This Month" tab)
+                          if (_selectedPeriod == 2) ...[
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.05),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
                                   ),
-                                  sectionsSpace: 2,
-                                  centerSpaceRadius: 40,
-                                ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Select Month',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: List.generate(12, (index) {
+                                      final month = index + 1;
+                                      final monthName = DateFormat('MMM').format(DateTime(2024, month));
+                                      final isSelected = _selectedMonth == month;
+                                      
+                                      return InkWell(
+                                        onTap: () {
+                                          setState(() {
+                                            _selectedMonth = month;
+                                          });
+                                          _loadDashboardData();
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: isSelected ? Colors.blue.shade700 : Colors.grey.shade100,
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            monthName,
+                                            style: TextStyle(
+                                              color: isSelected ? Colors.white : Colors.grey.shade700,
+                                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                  ),
+                                ],
                               ),
                             ),
                             const SizedBox(height: 16),
-                            ..._buildLegend(_stats!.visitorsByFacility),
                           ],
-                        ),
-                      ),
-                      const SizedBox(height: 32),
-                    ],
-
-                    // Payments by Facility Bar Chart
-                    if (_stats?.paymentsByFacility.isNotEmpty ?? false) ...[
-                      Text(
-                        'Payments by Facility',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
+                          
+                          // Statistics Cards
+                          _buildStatisticsSection(),
+                          
+                          const SizedBox(height: 24),
+                          
+                          // View Tickets Button
+                          _buildViewTicketsButton(),
+                          
+                          const SizedBox(height: 24),
+                          
+                          // Charts Section
+                          if (_stats != null) ...[
+                            _buildChartsSection(),
                           ],
-                        ),
-                        child: Column(
-                          children: [
-                            SizedBox(
-                              height: 250,
-                              child: BarChart(
-                                BarChartData(
-                                  alignment: BarChartAlignment.spaceAround,
-                                  maxY: _getMaxPayment(_stats!.paymentsByFacility) * 1.2,
-                                  barGroups: _buildBarChartGroups(
-                                    _stats!.paymentsByFacility,
-                                  ),
-                                  titlesData: FlTitlesData(
-                                    leftTitles: AxisTitles(
-                                      sideTitles: SideTitles(
-                                        showTitles: true,
-                                        reservedSize: 50,
-                                        getTitlesWidget: (value, meta) {
-                                          return Text(
-                                            '₱${NumberFormat.compact().format(value)}',
-                                            style: const TextStyle(fontSize: 10),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                    bottomTitles: AxisTitles(
-                                      sideTitles: SideTitles(
-                                        showTitles: true,
-                                        getTitlesWidget: (value, meta) {
-                                          final facilities = _stats!.paymentsByFacility.keys.toList();
-                                          if (value.toInt() >= 0 && value.toInt() < facilities.length) {
-                                            return Padding(
-                                              padding: const EdgeInsets.only(top: 8),
-                                              child: Text(
-                                                facilities[value.toInt()],
-                                                style: const TextStyle(fontSize: 10),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            );
-                                          }
-                                          return const Text('');
-                                        },
-                                      ),
-                                    ),
-                                    rightTitles: const AxisTitles(
-                                      sideTitles: SideTitles(showTitles: false),
-                                    ),
-                                    topTitles: const AxisTitles(
-                                      sideTitles: SideTitles(showTitles: false),
-                                    ),
-                                  ),
-                                  gridData: FlGridData(
-                                    show: true,
-                                    drawVerticalLine: false,
-                                  ),
-                                  borderData: FlBorderData(show: false),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
-                    ],
-                  ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
     );
   }
 
-  Widget _buildStatCard(
-    String label,
-    String value,
-    IconData icon,
-    Color color, {
-    bool isWide = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [color, color.withValues(alpha: 0.7)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+  Widget _buildStatisticsSection() {
+    double payment = 0;
+    int visitors = 0;
+    
+    // Get data based on selected period
+    if (_stats != null) {
+      switch (_selectedPeriod) {
+        case 0: // Today
+          payment = _stats!.totalPaymentToday;
+          visitors = _stats!.visitorsToday;
+          break;
+        case 1: // This Week
+          payment = _stats!.totalPaymentWeek;
+          visitors = _stats!.visitorsWeek;
+          break;
+        case 2: // This Month
+          payment = _stats!.totalPaymentMonth;
+          visitors = _stats!.visitorsMonth;
+          break;
+      }
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Overview',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey.shade800,
+          ),
         ),
-        borderRadius: BorderRadius.circular(16),
+        const SizedBox(height: 12),
+        
+        // Uniform stat cards
+        Row(
+          children: [
+            Expanded(
+              child: _buildUniformStatCard(
+                'Total Payment',
+                '₱${NumberFormat('#,##0.00').format(payment)}',
+                Icons.payments_outlined,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildUniformStatCard(
+                'Total Visitors',
+                '$visitors',
+                Icons.people_outline,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUniformStatCard(String label, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.3),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
-            offset: const Offset(0, 4),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Icon(icon, color: Colors.white.withValues(alpha: 0.8), size: 28),
-              if (isWide)
-                Icon(Icons.trending_up, color: Colors.white.withValues(alpha: 0.6)),
-            ],
-          ),
+          Icon(icon, color: Colors.blue.shade700, size: 32),
           const SizedBox(height: 12),
           Text(
             label,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.9),
-              fontSize: 14,
+              fontSize: 13,
+              color: Colors.grey.shade600,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
+              color: Colors.grey.shade800,
             ),
           ),
         ],
@@ -350,16 +429,247 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildViewTicketsButton() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.receipt_long, color: Colors.blue.shade700, size: 32),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ticket Records',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$_ticketCount ticket${_ticketCount != 1 ? 's' : ''} available',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => TicketsScreen(
+                      selectedPeriod: _selectedPeriod,
+                      selectedMonth: _selectedMonth,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('View All Tickets'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                backgroundColor: Colors.blue.shade700,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChartsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Analytics',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey.shade800,
+          ),
+        ),
+        const SizedBox(height: 12),
+        
+        // Visitors by Facility Pie Chart
+        if (_stats!.visitorsByFacility.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Visitors by Facility',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  height: 200,
+                  child: PieChart(
+                    PieChartData(
+                      sections: _buildPieChartSections(_stats!.visitorsByFacility),
+                      sectionsSpace: 2,
+                      centerSpaceRadius: 50,
+                      borderData: FlBorderData(show: false),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ..._buildLegend(_stats!.visitorsByFacility),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        
+        // Payments by Facility Bar Chart
+        if (_stats!.paymentsByFacility.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Payments by Facility',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  height: 250,
+                  child: BarChart(
+                    BarChartData(
+                      alignment: BarChartAlignment.spaceAround,
+                      maxY: _getMaxPayment(_stats!.paymentsByFacility) * 1.2,
+                      barGroups: _buildBarChartGroups(_stats!.paymentsByFacility),
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 50,
+                            getTitlesWidget: (value, meta) {
+                              return Text(
+                                '₱${NumberFormat.compact().format(value)}',
+                                style: const TextStyle(fontSize: 10),
+                              );
+                            },
+                          ),
+                        ),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              final facilities = _stats!.paymentsByFacility.keys.toList();
+                              if (value.toInt() >= 0 && value.toInt() < facilities.length) {
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    facilities[value.toInt()],
+                                    style: const TextStyle(fontSize: 10),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }
+                              return const Text('');
+                            },
+                          ),
+                        ),
+                        rightTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                        topTitles: const AxisTitles(
+                          sideTitles: SideTitles(showTitles: false),
+                        ),
+                      ),
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                      ),
+                      borderData: FlBorderData(show: false),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   List<PieChartSectionData> _buildPieChartSections(Map<String, int> data) {
     final colors = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.red,
-      Colors.teal,
-      Colors.pink,
-      Colors.amber,
+      Colors.blue.shade700,
+      Colors.green.shade600,
+      Colors.orange.shade600,
+      Colors.purple.shade600,
+      Colors.red.shade600,
+      Colors.teal.shade600,
+      Colors.pink.shade600,
+      Colors.amber.shade700,
     ];
 
     int index = 0;
@@ -370,7 +680,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         value: entry.value.toDouble(),
         title: '${entry.value}',
         color: color,
-        radius: 50,
+        radius: 60,
         titleStyle: const TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.bold,
@@ -382,14 +692,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<Widget> _buildLegend(Map<String, int> data) {
     final colors = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.red,
-      Colors.teal,
-      Colors.pink,
-      Colors.amber,
+      Colors.blue.shade700,
+      Colors.green.shade600,
+      Colors.orange.shade600,
+      Colors.purple.shade600,
+      Colors.red.shade600,
+      Colors.teal.shade600,
+      Colors.pink.shade600,
+      Colors.amber.shade700,
     ];
 
     int index = 0;
@@ -397,7 +707,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final color = colors[index % colors.length];
       index++;
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.only(bottom: 8),
         child: Row(
           children: [
             Container(
@@ -412,13 +722,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Expanded(
               child: Text(
                 entry.key,
-                style: const TextStyle(fontSize: 14),
+                style: const TextStyle(fontSize: 13),
               ),
             ),
             Text(
               '${entry.value} visitors',
               style: const TextStyle(
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -430,14 +740,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<BarChartGroupData> _buildBarChartGroups(Map<String, double> data) {
     final colors = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.red,
-      Colors.teal,
-      Colors.pink,
-      Colors.amber,
+      Colors.blue.shade700,
+      Colors.green.shade600,
+      Colors.orange.shade600,
+      Colors.purple.shade600,
+      Colors.red.shade600,
+      Colors.teal.shade600,
+      Colors.pink.shade600,
+      Colors.amber.shade700,
     ];
 
     int index = 0;
@@ -463,4 +773,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (data.isEmpty) return 100;
     return data.values.reduce((a, b) => a > b ? a : b);
   }
+
+
 }

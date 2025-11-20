@@ -65,17 +65,20 @@ class SupabaseService {
     }
   }
 
-  // Get dashboard statistics
-  Future<DashboardStats> getDashboardStats() async {
+  // Get dashboard statistics with optional month filter
+  Future<DashboardStats> getDashboardStats({DateTime? selectedMonth}) async {
     try {
       debugPrint('Fetching dashboard statistics...');
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
       final weekStart = today.subtract(Duration(days: now.weekday - 1));
-      final monthStart = DateTime(now.year, now.month, 1);
+      
+      // Use selected month or current month
+      final targetMonth = selectedMonth ?? now;
+      final monthStart = DateTime(targetMonth.year, targetMonth.month, 1);
+      final monthEnd = DateTime(targetMonth.year, targetMonth.month + 1, 1).subtract(const Duration(days: 1));
 
-      // Fetch ALL tickets and filter client-side
-      // This ensures we get data even if visit_date is null or in the future
+      // Fetch ALL tickets
       debugPrint('Querying tickets table...');
       final response = await _client
           .from('tickets')
@@ -90,44 +93,57 @@ class SupabaseService {
       
       debugPrint('Total tickets fetched: ${allTickets.length}');
 
-      // Filter tickets for current month based on visit_date or created_at
+      // Filter tickets for selected month
       final tickets = allTickets.where((ticket) {
-        final dateToCheck = ticket.visitDate ?? ticket.createdAt;
-        return dateToCheck.isAfter(monthStart.subtract(const Duration(days: 1)));
+        final dateToCheck = ticket.visitDate;
+        return dateToCheck.isAfter(monthStart.subtract(const Duration(days: 1))) &&
+               dateToCheck.isBefore(monthEnd.add(const Duration(days: 1)));
       }).toList();
       
-      debugPrint('Tickets in current month: ${tickets.length}');
+      debugPrint('Tickets in selected month: ${tickets.length}');
 
       // Calculate statistics
       double totalPaymentToday = 0;
       double totalPaymentWeek = 0;
       double totalPaymentMonth = 0;
+      double totalPaymentAllTime = 0;
       int visitorsToday = 0;
       int visitorsWeek = 0;
       int visitorsMonth = tickets.length;
+      int visitorsAllTime = allTickets.length;
 
       Map<String, int> visitorsByFacility = {};
       Map<String, double> paymentsByFacility = {};
 
-      for (var ticket in tickets) {
-        final visitDate = ticket.visitDate ?? ticket.createdAt;
-        final amount = ticket.amount ?? 0;
-        final facility = ticket.facility ?? 'Unknown';
+      // Calculate all-time stats
+      for (var ticket in allTickets) {
+        final amount = ticket.amount;
+        totalPaymentAllTime += amount;
+      }
 
-        // Update facility counts
+      // Calculate month-specific stats
+      for (var ticket in tickets) {
+        final visitDate = ticket.visitDate;
+        final amount = ticket.amount;
+        final facility = ticket.facility;
+
+        // Update facility counts (for selected month)
         visitorsByFacility[facility] = (visitorsByFacility[facility] ?? 0) + 1;
         paymentsByFacility[facility] = (paymentsByFacility[facility] ?? 0) + amount;
 
-        // Today's stats
-        if (visitDate.isAfter(today) || visitDate.isAtSameMomentAs(today)) {
-          totalPaymentToday += amount;
-          visitorsToday++;
-        }
+        // Today's stats (only if viewing current month)
+        if (selectedMonth == null || (targetMonth.year == now.year && targetMonth.month == now.month)) {
+          if (visitDate.isAfter(today.subtract(const Duration(days: 1))) && 
+              visitDate.isBefore(today.add(const Duration(days: 1)))) {
+            totalPaymentToday += amount;
+            visitorsToday++;
+          }
 
-        // Week's stats
-        if (visitDate.isAfter(weekStart) || visitDate.isAtSameMomentAs(weekStart)) {
-          totalPaymentWeek += amount;
-          visitorsWeek++;
+          // Week's stats
+          if (visitDate.isAfter(weekStart.subtract(const Duration(days: 1)))) {
+            totalPaymentWeek += amount;
+            visitorsWeek++;
+          }
         }
 
         // Month's stats
@@ -138,15 +154,18 @@ class SupabaseService {
       debugPrint('  Today: ₱$totalPaymentToday, $visitorsToday visitors');
       debugPrint('  Week: ₱$totalPaymentWeek, $visitorsWeek visitors');
       debugPrint('  Month: ₱$totalPaymentMonth, $visitorsMonth visitors');
+      debugPrint('  All Time: ₱$totalPaymentAllTime, $visitorsAllTime visitors');
       debugPrint('  Facilities: ${visitorsByFacility.keys.join(", ")}');
 
       return DashboardStats(
         totalPaymentToday: totalPaymentToday,
         totalPaymentWeek: totalPaymentWeek,
         totalPaymentMonth: totalPaymentMonth,
+        totalPaymentAllTime: totalPaymentAllTime,
         visitorsToday: visitorsToday,
         visitorsWeek: visitorsWeek,
         visitorsMonth: visitorsMonth,
+        visitorsAllTime: visitorsAllTime,
         visitorsByFacility: visitorsByFacility,
         paymentsByFacility: paymentsByFacility,
       );

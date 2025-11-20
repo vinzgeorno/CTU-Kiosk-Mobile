@@ -76,71 +76,77 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
 
             // Ticket Details
             Container(
-              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.grey[100],
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Column(
-                children: [
-                  _buildDetailRow(
-                    'Reference Number',
-                    widget.ticket.referenceNumber,
-                    Icons.confirmation_number,
-                  ),
-                  const Divider(height: 24),
-                  _buildDetailRow(
-                    'Name',
-                    widget.ticket.name,
-                    Icons.person,
-                  ),
-                  if (widget.ticket.age != null) ...[
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.4,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildDetailRow(
+                      'Reference Number',
+                      widget.ticket.referenceNumber,
+                      Icons.confirmation_number,
+                    ),
                     const Divider(height: 24),
                     _buildDetailRow(
-                      'Age',
-                      '${widget.ticket.age} years old',
-                      Icons.cake,
+                      'Name',
+                      widget.ticket.name,
+                      Icons.person,
                     ),
-                  ],
-                  const Divider(height: 24),
-                  _buildDetailRow(
-                    'Facility',
-                    widget.ticket.facility,
-                    Icons.location_on,
-                  ),
-                  const Divider(height: 24),
-                  _buildDetailRow(
-                    'Amount Paid',
-                    '₱${widget.ticket.paymentAmount.toStringAsFixed(2)}',
-                    Icons.payments,
-                  ),
-                  if (widget.ticket.hasDiscount && widget.ticket.originalPrice != null) ...[
+                    if (widget.ticket.age != null) ...[
+                      const Divider(height: 24),
+                      _buildDetailRow(
+                        'Age',
+                        '${widget.ticket.age} years old',
+                        Icons.cake,
+                      ),
+                    ],
                     const Divider(height: 24),
                     _buildDetailRow(
-                      'Original Price',
-                      '₱${widget.ticket.originalPrice!.toStringAsFixed(2)}',
-                      Icons.discount,
+                      'Facility',
+                      widget.ticket.facility,
+                      Icons.location_on,
+                    ),
+                    const Divider(height: 24),
+                    _buildDetailRow(
+                      'Amount Paid',
+                      '₱${widget.ticket.paymentAmount.toStringAsFixed(2)}',
+                      Icons.payments,
+                    ),
+                    if (widget.ticket.hasDiscount && widget.ticket.originalPrice != null) ...[
+                      const Divider(height: 24),
+                      _buildDetailRow(
+                        'Original Price',
+                        '₱${widget.ticket.originalPrice!.toStringAsFixed(2)}',
+                        Icons.discount,
+                      ),
+                    ],
+                    const Divider(height: 24),
+                    _buildDetailRow(
+                      'Date Created',
+                      dateFormat.format(widget.ticket.dateCreated),
+                      Icons.calendar_today,
+                    ),
+                    const Divider(height: 24),
+                    _buildDetailRow(
+                      'Expiry Date',
+                      dateFormat.format(widget.ticket.dateExpiry),
+                      Icons.event_busy,
+                    ),
+                    const Divider(height: 24),
+                    _buildDetailRow(
+                      'Status',
+                      widget.ticket.transactionStatus.toUpperCase(),
+                      Icons.info,
                     ),
                   ],
-                  const Divider(height: 24),
-                  _buildDetailRow(
-                    'Date Created',
-                    dateFormat.format(widget.ticket.dateCreated),
-                    Icons.calendar_today,
-                  ),
-                  const Divider(height: 24),
-                  _buildDetailRow(
-                    'Expiry Date',
-                    dateFormat.format(widget.ticket.dateExpiry),
-                    Icons.event_busy,
-                  ),
-                  const Divider(height: 24),
-                  _buildDetailRow(
-                    'Status',
-                    widget.ticket.transactionStatus.toUpperCase(),
-                    Icons.info,
-                  ),
-                ],
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -175,8 +181,12 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
 
   Widget _buildDetailRow(String label, String value, IconData icon) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 20, color: Colors.grey[600]),
+        Padding(
+          padding: const EdgeInsets.only(top: 4.0),
+          child: Icon(icon, size: 20, color: Colors.grey[600]),
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -196,6 +206,9 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
+                maxLines: 10,
+                overflow: TextOverflow.ellipsis,
+                softWrap: true,
               ),
             ],
           ),
