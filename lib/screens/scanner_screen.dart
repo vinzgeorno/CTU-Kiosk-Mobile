@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/supabase_service.dart';
+import '../services/local_database_service.dart';
 import '../widgets/ticket_validation_dialog.dart';
+import '../widgets/sync_status_widget.dart';
+import '../models/ticket_cache.dart';
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
@@ -12,6 +15,7 @@ class ScannerScreen extends StatefulWidget {
 
 class _ScannerScreenState extends State<ScannerScreen> {
   final SupabaseService _supabaseService = SupabaseService();
+  final LocalDatabaseService _localDb = LocalDatabaseService();
   final TextEditingController _referenceController = TextEditingController();
   final MobileScannerController _scannerController = MobileScannerController();
   bool _isProcessing = false;
@@ -30,29 +34,70 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     try {
       debugPrint('Validating ticket: $referenceNumber');
-      final ticket = await _supabaseService.validateTicket(referenceNumber);
-      
-      if (!mounted) return;
 
-      if (ticket != null) {
-        debugPrint('Ticket found: ${ticket.referenceNumber}');
-        debugPrint('  - Name: ${ticket.name}');
-        debugPrint('  - Facility: ${ticket.facility}');
-        debugPrint('  - Amount: ₱${ticket.paymentAmount}');
-        debugPrint('  - Status: ${ticket.transactionStatus}');
-        debugPrint('  - Expiry: ${ticket.dateExpiry}');
-        debugPrint('  - Is Valid: ${ticket.isValid}');
-        debugPrint('  - Is Expired: ${ticket.isExpired}');
-        debugPrint('  - Expiry Status: ${ticket.expiryStatus}');
-        
+      // Step 1: Try to find ticket in local cache first (for offline support)
+      debugPrint('Searching in local cache...');
+      final cachedTicket = await _localDb.getTicketByReferenceNumber(
+        referenceNumber,
+      );
+
+      if (cachedTicket != null) {
+        debugPrint(
+          '✓ Ticket found in local cache: ${cachedTicket.referenceNumber}',
+        );
+        if (!mounted) return;
+
         await showDialog(
           context: context,
-          builder: (context) => TicketValidationDialog(ticket: ticket),
+          builder: (context) => TicketValidationDialog(ticket: cachedTicket),
         );
       } else {
-        debugPrint('Ticket not found: $referenceNumber');
-        _showErrorDialog('Ticket Not Found', 
-            'No ticket found with reference number: $referenceNumber');
+        // Step 2: If not in cache, try to fetch from Supabase (if online)
+        debugPrint('Ticket not in cache, checking Supabase...');
+        final isOnline = await _supabaseService.testConnection();
+
+        if (isOnline) {
+          debugPrint('Online: Fetching from Supabase...');
+          final ticket = await _supabaseService.validateTicket(referenceNumber);
+
+          if (!mounted) return;
+
+          if (ticket != null) {
+            debugPrint(
+              'Ticket from Supabase: Ref#${ticket.referenceNumber}, Facility: ${ticket.facility}, Amount: ₱${ticket.amountPaid}, Status: ${ticket.transactionStatus}',
+            );
+
+            // Convert Ticket to TicketCache for display
+            final cacheTicket = TicketCache(
+              id: ticket.id.toString(),
+              referenceNumber: ticket.referenceNumber,
+              age: ticket.age,
+              facility: ticket.facility,
+              amount: ticket.amountPaid,
+              visitDate: ticket.visitDate,
+              createdAt: ticket.createdAt,
+              transactionStatus: ticket.transactionStatus,
+            );
+
+            await showDialog(
+              context: context,
+              builder: (context) => TicketValidationDialog(ticket: cacheTicket),
+            );
+          } else {
+            debugPrint('Ticket not found in Supabase: $referenceNumber');
+            _showErrorDialog(
+              'Ticket Not Found',
+              'No ticket found with reference number: $referenceNumber\n\n(Not found in database)',
+            );
+          }
+        } else {
+          // Offline and not in cache
+          debugPrint('Offline mode: Ticket not in local cache');
+          _showErrorDialog(
+            'Offline - Ticket Not Found',
+            'Ticket not found in local cache.\n\nThe app is currently offline and cannot check the main database.\n\nReference: $referenceNumber',
+          );
+        }
       }
     } catch (e) {
       debugPrint('Error validating ticket: $e');
@@ -92,6 +137,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Sync Status
+            const SyncStatusWidget(),
+            const SizedBox(height: 16),
+
             // QR Scanner Section
             Container(
               decoration: BoxDecoration(
@@ -128,10 +177,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     Positioned.fill(
                       child: Container(
                         decoration: BoxDecoration(
-                          border: Border.all(
-                            color: Colors.white,
-                            width: 3,
-                          ),
+                          border: Border.all(color: Colors.white, width: 3),
                           borderRadius: BorderRadius.circular(20),
                         ),
                       ),
@@ -143,7 +189,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
                       right: 0,
                       child: Center(
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.7),
                             borderRadius: BorderRadius.circular(20),
@@ -151,7 +200,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.qr_code_scanner, color: Colors.white, size: 20),
+                              Icon(
+                                Icons.qr_code_scanner,
+                                color: Colors.white,
+                                size: 20,
+                              ),
                               const SizedBox(width: 8),
                               Text(
                                 'Position QR code within frame',
@@ -201,8 +254,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   Text(
                     'Enter Reference Number',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(

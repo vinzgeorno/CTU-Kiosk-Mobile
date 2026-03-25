@@ -10,10 +10,7 @@ class SupabaseService {
   Future<bool> testConnection() async {
     try {
       debugPrint('Testing Supabase connection...');
-      final response = await _client
-          .from('tickets')
-          .select('id')
-          .limit(1);
+      final response = await _client.from('tickets_new').select('id').limit(1);
       debugPrint('Connection successful! Response: $response');
       return true;
     } catch (e) {
@@ -27,16 +24,16 @@ class SupabaseService {
     try {
       debugPrint('Fetching all tickets from Supabase...');
       final response = await _client
-          .from('tickets')
+          .from('tickets_new')
           .select()
           .order('created_at', ascending: false);
 
       debugPrint('Raw response: $response');
-      
+
       final tickets = (response as List)
           .map((json) => Ticket.fromJson(json))
           .toList();
-      
+
       debugPrint('Successfully fetched ${tickets.length} tickets');
       return tickets;
     } catch (e) {
@@ -49,7 +46,7 @@ class SupabaseService {
   Future<Ticket?> validateTicket(String referenceNumber) async {
     try {
       final response = await _client
-          .from('tickets')
+          .from('tickets_new')
           .select()
           .eq('reference_number', referenceNumber)
           .maybeSingle();
@@ -66,22 +63,30 @@ class SupabaseService {
   }
 
   // Get dashboard statistics with optional month filter
-  Future<DashboardStats> getDashboardStats({DateTime? selectedMonth}) async {
+  Future<DashboardStats> getDashboardStats({
+    DateTime? selectedMonth,
+    int period = 2, // 0: Today, 1: Week, 2: Month
+  }) async {
     try {
       debugPrint('Fetching dashboard statistics...');
       final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
+      // Use UTC dates to avoid timezone issues
+      final today = DateTime.utc(now.year, now.month, now.day);
       final weekStart = today.subtract(Duration(days: now.weekday - 1));
-      
+
       // Use selected month or current month
       final targetMonth = selectedMonth ?? now;
-      final monthStart = DateTime(targetMonth.year, targetMonth.month, 1);
-      final monthEnd = DateTime(targetMonth.year, targetMonth.month + 1, 1).subtract(const Duration(days: 1));
+      final monthStart = DateTime.utc(targetMonth.year, targetMonth.month, 1);
+      final monthEnd = DateTime.utc(
+        targetMonth.year,
+        targetMonth.month + 1,
+        1,
+      ).subtract(const Duration(days: 1));
 
       // Fetch ALL tickets
       debugPrint('Querying tickets table...');
       final response = await _client
-          .from('tickets')
+          .from('tickets_new')
           .select()
           .order('created_at', ascending: false);
 
@@ -90,17 +95,52 @@ class SupabaseService {
       final allTickets = (response as List)
           .map((json) => Ticket.fromJson(json))
           .toList();
-      
+
       debugPrint('Total tickets fetched: ${allTickets.length}');
 
-      // Filter tickets for selected month
+      // Determine which date range to filter based on period
+      DateTime filterStart;
+      DateTime filterEnd;
+
+      switch (period) {
+        case 0: // Today
+          filterStart = today;
+          filterEnd = today.add(const Duration(days: 1));
+          break;
+        case 1: // This Week
+          filterStart = weekStart;
+          filterEnd = today.add(const Duration(days: 1));
+          break;
+        case 2: // This Month
+        default:
+          filterStart = monthStart;
+          filterEnd = monthEnd.add(const Duration(days: 1));
+          break;
+      }
+
+      debugPrint(
+        'Filter range: ${filterStart.toIso8601String()} to ${filterEnd.toIso8601String()}',
+      );
+
+      // Filter tickets for selected period
+      // Normalize ticket dates to UTC date-only for comparison
       final tickets = allTickets.where((ticket) {
-        final dateToCheck = ticket.visitDate;
-        return dateToCheck.isAfter(monthStart.subtract(const Duration(days: 1))) &&
-               dateToCheck.isBefore(monthEnd.add(const Duration(days: 1)));
+        final ticketDate = DateTime.utc(
+          ticket.visitDate.year,
+          ticket.visitDate.month,
+          ticket.visitDate.day,
+        );
+        final isInRange =
+            !ticketDate.isBefore(filterStart) && ticketDate.isBefore(filterEnd);
+        if (!isInRange) {
+          debugPrint(
+            'Excluded ticket ${ticket.referenceNumber}: ${ticket.visitDate} (${ticketDate.toIso8601String()})',
+          );
+        }
+        return isInRange;
       }).toList();
-      
-      debugPrint('Tickets in selected month: ${tickets.length}');
+
+      debugPrint('Tickets in selected period: ${tickets.length}');
 
       // Calculate statistics
       double totalPaymentToday = 0;
@@ -114,6 +154,14 @@ class SupabaseService {
 
       Map<String, int> visitorsByFacility = {};
       Map<String, double> paymentsByFacility = {};
+      Map<String, int> visitorsByTicketType = {};
+      Map<String, double> paymentsByTicketType = {};
+      Map<String, int> visitorsByAgeCategory = {};
+      Map<String, double> paymentsByAgeCategory = {};
+      int visitorsBelow12 = 0;
+      int visitorsAbove12 = 0;
+      double paymentBelowGroup = 0;
+      double paymentAboveGroup = 0;
 
       // Calculate all-time stats
       for (var ticket in allTickets) {
@@ -121,29 +169,53 @@ class SupabaseService {
         totalPaymentAllTime += amount;
       }
 
-      // Calculate month-specific stats
+      // Calculate period-specific stats
       for (var ticket in tickets) {
         final visitDate = ticket.visitDate;
         final amount = ticket.amount;
         final facility = ticket.facility;
 
-        // Update facility counts (for selected month)
+        // Update facility counts
         visitorsByFacility[facility] = (visitorsByFacility[facility] ?? 0) + 1;
-        paymentsByFacility[facility] = (paymentsByFacility[facility] ?? 0) + amount;
+        paymentsByFacility[facility] =
+            (paymentsByFacility[facility] ?? 0) + amount;
 
-        // Today's stats (only if viewing current month)
-        if (selectedMonth == null || (targetMonth.year == now.year && targetMonth.month == now.month)) {
-          if (visitDate.isAfter(today.subtract(const Duration(days: 1))) && 
-              visitDate.isBefore(today.add(const Duration(days: 1)))) {
-            totalPaymentToday += amount;
-            visitorsToday++;
-          }
+        // Ticket type breakdown
+        final ticketType = ticket.ticketType ?? 'Unknown';
+        visitorsByTicketType[ticketType] =
+            (visitorsByTicketType[ticketType] ?? 0) + 1;
+        paymentsByTicketType[ticketType] =
+            (paymentsByTicketType[ticketType] ?? 0) + amount;
 
-          // Week's stats
-          if (visitDate.isAfter(weekStart.subtract(const Duration(days: 1)))) {
-            totalPaymentWeek += amount;
-            visitorsWeek++;
-          }
+        // Age category breakdown
+        final ageCategory = ticket.ageCategory ?? 'Unknown';
+        visitorsByAgeCategory[ageCategory] =
+            (visitorsByAgeCategory[ageCategory] ?? 0) + 1;
+        paymentsByAgeCategory[ageCategory] =
+            (paymentsByAgeCategory[ageCategory] ?? 0) + amount;
+
+        // Below 12 / Above 12 breakdown
+        if (ticket.peopleBelow12 != null && ticket.peopleBelow12! > 0) {
+          visitorsBelow12 += ticket.peopleBelow12!;
+          paymentBelowGroup += amount;
+        }
+        if (ticket.people12Above != null && ticket.people12Above! > 0) {
+          visitorsAbove12 += ticket.people12Above!;
+          paymentAboveGroup += amount;
+        }
+
+        // Today's stats
+        if (visitDate.isAfter(today) &&
+            visitDate.isBefore(today.add(const Duration(days: 1)))) {
+          totalPaymentToday += amount;
+          visitorsToday++;
+        }
+
+        // Week's stats
+        if (visitDate.isAfter(weekStart) &&
+            visitDate.isBefore(today.add(const Duration(days: 1)))) {
+          totalPaymentWeek += amount;
+          visitorsWeek++;
         }
 
         // Month's stats
@@ -154,7 +226,9 @@ class SupabaseService {
       debugPrint('  Today: ₱$totalPaymentToday, $visitorsToday visitors');
       debugPrint('  Week: ₱$totalPaymentWeek, $visitorsWeek visitors');
       debugPrint('  Month: ₱$totalPaymentMonth, $visitorsMonth visitors');
-      debugPrint('  All Time: ₱$totalPaymentAllTime, $visitorsAllTime visitors');
+      debugPrint(
+        '  All Time: ₱$totalPaymentAllTime, $visitorsAllTime visitors',
+      );
       debugPrint('  Facilities: ${visitorsByFacility.keys.join(", ")}');
 
       return DashboardStats(
@@ -168,6 +242,14 @@ class SupabaseService {
         visitorsAllTime: visitorsAllTime,
         visitorsByFacility: visitorsByFacility,
         paymentsByFacility: paymentsByFacility,
+        visitorsByTicketType: visitorsByTicketType,
+        paymentsByTicketType: paymentsByTicketType,
+        visitorsByAgeCategory: visitorsByAgeCategory,
+        paymentsByAgeCategory: paymentsByAgeCategory,
+        visitorsBelow12: visitorsBelow12,
+        visitorsAbove12: visitorsAbove12,
+        paymentBelowGroup: paymentBelowGroup,
+        paymentAboveGroup: paymentAboveGroup,
       );
     } catch (e, stackTrace) {
       debugPrint('Error fetching dashboard stats: $e');
@@ -175,5 +257,4 @@ class SupabaseService {
       return DashboardStats.empty();
     }
   }
-
 }

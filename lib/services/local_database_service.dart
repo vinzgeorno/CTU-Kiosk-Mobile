@@ -6,7 +6,7 @@ import 'supabase_service.dart';
 class LocalDatabaseService {
   static const String _ticketsBoxName = 'tickets_cache';
   static const String _lastSyncKey = 'last_sync';
-  
+
   final SupabaseService _supabaseService = SupabaseService();
   Box<TicketCache>? _ticketsBox;
   Box? _metaBox;
@@ -16,16 +16,16 @@ class LocalDatabaseService {
     try {
       debugPrint('Initializing Hive...');
       await Hive.initFlutter();
-      
+
       // Register adapters
       if (!Hive.isAdapterRegistered(0)) {
         Hive.registerAdapter(TicketCacheAdapter());
       }
-      
+
       // Open boxes
       _ticketsBox = await Hive.openBox<TicketCache>(_ticketsBoxName);
       _metaBox = await Hive.openBox('metadata');
-      
+
       debugPrint('Hive initialized successfully');
       debugPrint('Cached tickets: ${_ticketsBox?.length ?? 0}');
     } catch (e) {
@@ -38,47 +38,45 @@ class LocalDatabaseService {
   Future<void> syncFromSupabase({bool force = false}) async {
     try {
       debugPrint('Starting sync from Supabase...');
-      
+
       // Check if we need to sync (every 5 minutes or forced)
       final lastSync = _metaBox?.get(_lastSyncKey) as DateTime?;
       final now = DateTime.now();
-      
+
       if (!force && lastSync != null) {
         final difference = now.difference(lastSync);
         if (difference.inMinutes < 5) {
-          debugPrint('Skipping sync - last sync was ${difference.inMinutes} minutes ago');
+          debugPrint(
+            'Skipping sync - last sync was ${difference.inMinutes} minutes ago',
+          );
           return;
         }
       }
-      
+
       // Fetch all tickets from Supabase
       final tickets = await _supabaseService.getAllTickets();
       debugPrint('Fetched ${tickets.length} tickets from Supabase');
-      
+
       // Clear existing cache
       await _ticketsBox?.clear();
-      
+
       // Store tickets in local database
       for (var ticket in tickets) {
         final cache = TicketCache(
           id: ticket.id.toString(),
           referenceNumber: ticket.referenceNumber,
-          name: ticket.name,
           facility: ticket.facility,
-          amount: ticket.amount,
-          visitDate: ticket.visitDate,
+          amount: ticket.amountPaid,
+          visitDate: ticket.createdAt,
+          transactionStatus: ticket.transactionStatus,
           createdAt: ticket.createdAt,
-          isValid: ticket.isValid,
-          imageUrl: null, // Ticket model doesn't have imageUrl yet
-          email: null, // Ticket model doesn't have email yet
-          phone: null, // Ticket model doesn't have phone yet
         );
         await _ticketsBox?.put(ticket.id.toString(), cache);
       }
-      
+
       // Update last sync time
       await _metaBox?.put(_lastSyncKey, now);
-      
+
       debugPrint('Sync completed - ${tickets.length} tickets cached');
     } catch (e) {
       debugPrint('Error syncing from Supabase: $e');
@@ -92,7 +90,7 @@ class LocalDatabaseService {
       if (_ticketsBox == null) {
         await initialize();
       }
-      
+
       final tickets = _ticketsBox?.values.toList() ?? [];
       debugPrint('Retrieved ${tickets.length} tickets from local cache');
       return tickets;
@@ -103,18 +101,23 @@ class LocalDatabaseService {
   }
 
   // Get tickets filtered by date range
-  Future<List<TicketCache>> getTicketsByDateRange(DateTime start, DateTime end) async {
+  Future<List<TicketCache>> getTicketsByDateRange(
+    DateTime start,
+    DateTime end,
+  ) async {
     try {
       final allTickets = await getAllTickets();
-      
+
       final filtered = allTickets.where((ticket) {
-        return ticket.visitDate.isAfter(start.subtract(const Duration(days: 1))) &&
-               ticket.visitDate.isBefore(end.add(const Duration(days: 1)));
+        return ticket.visitDate.isAfter(
+              start.subtract(const Duration(days: 1)),
+            ) &&
+            ticket.visitDate.isBefore(end.add(const Duration(days: 1)));
       }).toList();
-      
+
       // Sort by visit date descending
       filtered.sort((a, b) => b.visitDate.compareTo(a.visitDate));
-      
+
       debugPrint('Filtered ${filtered.length} tickets for date range');
       return filtered;
     } catch (e) {
@@ -145,40 +148,59 @@ class LocalDatabaseService {
     return getTicketsByDateRange(monthStart, monthEnd);
   }
 
-  // Get ticket by reference number
-  Future<TicketCache?> getTicketByReference(String referenceNumber) async {
+  // Search for ticket by reference number
+  Future<TicketCache?> getTicketByReferenceNumber(
+    String referenceNumber,
+  ) async {
     try {
-      final allTickets = await getAllTickets();
-      return allTickets.firstWhere(
-        (ticket) => ticket.referenceNumber == referenceNumber,
-        orElse: () => throw Exception('Ticket not found'),
-      );
+      if (_ticketsBox == null) {
+        await initialize();
+      }
+
+      final tickets = _ticketsBox?.values.toList() ?? [];
+      debugPrint('Searching for ticket with reference: $referenceNumber');
+
+      for (var ticket in tickets) {
+        if (ticket.referenceNumber.toLowerCase() ==
+            referenceNumber.toLowerCase()) {
+          debugPrint('Found ticket in local cache: $referenceNumber');
+          return ticket;
+        }
+      }
+
+      debugPrint('Ticket not found in local cache: $referenceNumber');
+      return null;
     } catch (e) {
-      debugPrint('Ticket not found in cache: $referenceNumber');
+      debugPrint('Error searching for ticket: $e');
       return null;
     }
   }
 
-  // Add or update a single ticket
-  Future<void> upsertTicket(TicketCache ticket) async {
+  // Get last sync timestamp
+  Future<DateTime?> getLastSyncTime() async {
     try {
-      await _ticketsBox?.put(ticket.id, ticket);
-      debugPrint('Ticket cached: ${ticket.referenceNumber}');
+      return _metaBox?.get(_lastSyncKey) as DateTime?;
     } catch (e) {
-      debugPrint('Error caching ticket: $e');
+      debugPrint('Error getting last sync time: $e');
+      return null;
     }
   }
 
   // Get cache statistics
   Future<Map<String, dynamic>> getCacheStats() async {
-    final lastSync = _metaBox?.get(_lastSyncKey) as DateTime?;
-    final ticketCount = _ticketsBox?.length ?? 0;
-    
-    return {
-      'ticket_count': ticketCount,
-      'last_sync': lastSync,
-      'cache_size_kb': _ticketsBox?.length ?? 0 * 2, // Rough estimate
-    };
+    try {
+      final ticketCount = _ticketsBox?.length ?? 0;
+      final lastSync = await getLastSyncTime();
+
+      return {
+        'ticketCount': ticketCount,
+        'lastSync': lastSync,
+        'isCached': true,
+      };
+    } catch (e) {
+      debugPrint('Error getting cache stats: $e');
+      return {'ticketCount': 0, 'lastSync': null, 'isCached': false};
+    }
   }
 
   // Clear all cache

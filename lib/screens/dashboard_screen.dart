@@ -4,6 +4,8 @@ import 'package:fl_chart/fl_chart.dart';
 import '../services/supabase_service.dart';
 import '../services/local_database_service.dart';
 import '../models/dashboard_stats.dart';
+import '../widgets/sync_status_widget.dart';
+import '../widgets/money_remittance_export_dialog.dart';
 import 'tickets_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -13,7 +15,8 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
+class _DashboardScreenState extends State<DashboardScreen>
+    with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
   final LocalDatabaseService _localDb = LocalDatabaseService();
   DashboardStats? _stats;
@@ -22,6 +25,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   late TabController _tabController;
   int _selectedPeriod = 0; // 0: Today, 1: This Week, 2: This Month
   int _selectedMonth = DateTime.now().month; // 1-12 for month selection
+  int _selectedYear = DateTime.now().year; // Year selection
 
   @override
   void initState() {
@@ -32,6 +36,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         setState(() {
           _selectedPeriod = _tabController.index;
         });
+        // Reload data when tab changes
+        _loadDashboardData();
       }
     });
     _loadDashboardData();
@@ -44,6 +50,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
   Future<void> _loadDashboardData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     try {
       final isConnected = await _supabaseService.testConnection();
@@ -51,19 +58,17 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         throw Exception('Failed to connect to Supabase database');
       }
 
-      // Load stats based on selected month for "This Month" tab
-      DateTime? monthFilter;
-      if (_selectedPeriod == 2) {
-        final now = DateTime.now();
-        monthFilter = DateTime(now.year, _selectedMonth, 1);
-      }
-
       // Sync from Supabase
       await _localDb.syncFromSupabase();
-      
-      // Get stats from Supabase
-      final stats = await _supabaseService.getDashboardStats(selectedMonth: monthFilter);
-      
+
+      // Get stats from Supabase with current period
+      final stats = await _supabaseService.getDashboardStats(
+        selectedMonth: _selectedPeriod == 2
+            ? DateTime(_selectedYear, _selectedMonth, 1)
+            : null,
+        period: _selectedPeriod,
+      );
+
       // Get ticket count from local DB
       int count = 0;
       switch (_selectedPeriod) {
@@ -76,20 +81,24 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           count = tickets.length;
           break;
         case 2:
-          final now = DateTime.now();
-          final tickets = await _localDb.getMonthTickets(now.year, _selectedMonth);
+          final tickets = await _localDb.getMonthTickets(
+            _selectedYear,
+            _selectedMonth,
+          );
           count = tickets.length;
           break;
       }
-      
-      setState(() {
-        _stats = stats;
-        _ticketCount = count;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
+
       if (mounted) {
+        setState(() {
+          _stats = stats;
+          _ticketCount = count;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error loading data: $e'),
@@ -159,16 +168,24 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
+  Future<void> _showExportDialog() async {
+    final allTickets = await _localDb.getAllTickets();
+    if (mounted) {
+      showDialog(
+        context: context,
+        builder: (context) =>
+            MoneyRemittanceExportDialog(allTickets: allTickets),
+      );
+    }
+  }
+
   Widget _buildGuideItem(String title, String description) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 15,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
         ),
         const SizedBox(height: 4),
         Text(
@@ -196,6 +213,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             icon: const Icon(Icons.help_outline_rounded),
             onPressed: _showAppGuide,
             tooltip: 'Help',
+          ),
+          IconButton(
+            icon: const Icon(Icons.download_rounded),
+            onPressed: _showExportDialog,
+            tooltip: 'Export Remittance',
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -228,7 +250,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     ],
                   ),
                 ),
-                
+
+                // Sync Status
+                const SyncStatusWidget(),
+
                 // Content
                 Expanded(
                   child: RefreshIndicator(
@@ -239,7 +264,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Month Selector (only show for "This Month" tab)
+                          // Month and Year Selector (only show for "This Month" tab)
                           if (_selectedPeriod == 2) ...[
                             Container(
                               padding: const EdgeInsets.all(16),
@@ -257,23 +282,72 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'Select Month',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.grey.shade700,
-                                    ),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Select Month & Year',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey.shade700,
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade50,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: DropdownButton<int>(
+                                          value: _selectedYear,
+                                          underline: const SizedBox(),
+                                          items: [2023, 2024, 2025, 2026, 2027]
+                                              .map((year) {
+                                                return DropdownMenuItem(
+                                                  value: year,
+                                                  child: Text(
+                                                    year.toString(),
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color:
+                                                          Colors.blue.shade700,
+                                                    ),
+                                                  ),
+                                                );
+                                              })
+                                              .toList(),
+                                          onChanged: (value) {
+                                            if (value != null) {
+                                              setState(() {
+                                                _selectedYear = value;
+                                              });
+                                              _loadDashboardData();
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 16),
                                   Wrap(
                                     spacing: 8,
                                     runSpacing: 8,
                                     children: List.generate(12, (index) {
                                       final month = index + 1;
-                                      final monthName = DateFormat('MMM').format(DateTime(2024, month));
-                                      final isSelected = _selectedMonth == month;
-                                      
+                                      final monthName = DateFormat(
+                                        'MMM',
+                                      ).format(DateTime(2024, month));
+                                      final isSelected =
+                                          _selectedMonth == month;
+
                                       return InkWell(
                                         onTap: () {
                                           setState(() {
@@ -282,16 +356,33 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                                           _loadDashboardData();
                                         },
                                         child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 10,
+                                          ),
                                           decoration: BoxDecoration(
-                                            color: isSelected ? Colors.blue.shade700 : Colors.grey.shade100,
-                                            borderRadius: BorderRadius.circular(8),
+                                            color: isSelected
+                                                ? Colors.blue.shade700
+                                                : Colors.grey.shade100,
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            border: Border.all(
+                                              color: isSelected
+                                                  ? Colors.blue.shade700
+                                                  : Colors.grey.shade300,
+                                              width: 1.5,
+                                            ),
                                           ),
                                           child: Text(
                                             monthName,
                                             style: TextStyle(
-                                              color: isSelected ? Colors.white : Colors.grey.shade700,
-                                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                              color: isSelected
+                                                  ? Colors.white
+                                                  : Colors.grey.shade700,
+                                              fontWeight: isSelected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w500,
                                               fontSize: 13,
                                             ),
                                           ),
@@ -304,21 +395,19 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                             ),
                             const SizedBox(height: 16),
                           ],
-                          
+
                           // Statistics Cards
                           _buildStatisticsSection(),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // View Tickets Button
                           _buildViewTicketsButton(),
-                          
+
                           const SizedBox(height: 24),
-                          
+
                           // Charts Section
-                          if (_stats != null) ...[
-                            _buildChartsSection(),
-                          ],
+                          if (_stats != null) ...[_buildChartsSection()],
                         ],
                       ),
                     ),
@@ -332,7 +421,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget _buildStatisticsSection() {
     double payment = 0;
     int visitors = 0;
-    
+
     // Get data based on selected period
     if (_stats != null) {
       switch (_selectedPeriod) {
@@ -350,7 +439,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           break;
       }
     }
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -363,7 +452,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ),
         ),
         const SizedBox(height: 12),
-        
+
         // Uniform stat cards
         Row(
           children: [
@@ -454,7 +543,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   color: Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.receipt_long, color: Colors.blue.shade700, size: 32),
+                child: Icon(
+                  Icons.receipt_long,
+                  color: Colors.blue.shade700,
+                  size: 32,
+                ),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -493,6 +586,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     builder: (context) => TicketsScreen(
                       selectedPeriod: _selectedPeriod,
                       selectedMonth: _selectedMonth,
+                      selectedYear: _selectedYear,
                     ),
                   ),
                 );
@@ -524,139 +618,513 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ),
         ),
         const SizedBox(height: 12),
-        
+
         // Visitors by Facility Pie Chart
-        if (_stats!.visitorsByFacility.isNotEmpty) ...[
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Visitors by Facility',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade800,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  height: 200,
-                  child: PieChart(
-                    PieChartData(
-                      sections: _buildPieChartSections(_stats!.visitorsByFacility),
-                      sectionsSpace: 2,
-                      centerSpaceRadius: 50,
-                      borderData: FlBorderData(show: false),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                ..._buildLegend(_stats!.visitorsByFacility),
-              ],
-            ),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-        ],
-        
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Visitors by Facility',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 200,
+                child: PieChart(
+                  PieChartData(
+                    sections: _buildPieChartSections(
+                      _stats!.visitorsByFacility,
+                    ),
+                    sectionsSpace: 2,
+                    centerSpaceRadius: 50,
+                    borderData: FlBorderData(show: false),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ..._buildLegend(_stats!.visitorsByFacility),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
         // Payments by Facility Bar Chart
-        if (_stats!.paymentsByFacility.isNotEmpty) ...[
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Payments by Facility',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
                 ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Payments by Facility',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade800,
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 250,
+                child: BarChart(
+                  BarChartData(
+                    alignment: BarChartAlignment.spaceAround,
+                    maxY: _getMaxPayment(_stats!.paymentsByFacility) * 1.2,
+                    barGroups: _buildBarChartGroups(_stats!.paymentsByFacility),
+                    titlesData: FlTitlesData(
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 50,
+                          getTitlesWidget: (value, meta) {
+                            return Text(
+                              '₱${NumberFormat.compact().format(value)}',
+                              style: const TextStyle(fontSize: 10),
+                            );
+                          },
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            final facilities = _stats!.paymentsByFacility.keys
+                                .toList();
+                            if (value.toInt() >= 0 &&
+                                value.toInt() < facilities.length) {
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  facilities[value.toInt()],
+                                  style: const TextStyle(fontSize: 10),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }
+                            return const Text('');
+                          },
+                        ),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                    ),
+                    gridData: FlGridData(show: true, drawVerticalLine: false),
+                    borderData: FlBorderData(show: false),
                   ),
                 ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  height: 250,
-                  child: BarChart(
-                    BarChartData(
-                      alignment: BarChartAlignment.spaceAround,
-                      maxY: _getMaxPayment(_stats!.paymentsByFacility) * 1.2,
-                      barGroups: _buildBarChartGroups(_stats!.paymentsByFacility),
-                      titlesData: FlTitlesData(
-                        leftTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            reservedSize: 50,
-                            getTitlesWidget: (value, meta) {
-                              return Text(
-                                '₱${NumberFormat.compact().format(value)}',
-                                style: const TextStyle(fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Visitors by Ticket Type
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Visitors by Ticket Type',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 200,
+                child: PieChart(
+                  PieChartData(
+                    sections: _buildPieChartSections(
+                      _stats!.visitorsByTicketType,
+                    ),
+                    sectionsSpace: 2,
+                    centerSpaceRadius: 50,
+                    borderData: FlBorderData(show: false),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ..._buildLegend(_stats!.visitorsByTicketType),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Payments by Ticket Type
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Payments by Ticket Type',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 250,
+                child: BarChart(
+                  BarChartData(
+                    alignment: BarChartAlignment.spaceAround,
+                    maxY: _getMaxPayment(_stats!.paymentsByTicketType) * 1.2,
+                    barGroups: _buildBarChartGroups(
+                      _stats!.paymentsByTicketType,
+                    ),
+                    titlesData: FlTitlesData(
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 50,
+                          getTitlesWidget: (value, meta) {
+                            return Text(
+                              '₱${NumberFormat.compact().format(value)}',
+                              style: const TextStyle(fontSize: 10),
+                            );
+                          },
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            final types = _stats!.paymentsByTicketType.keys
+                                .toList();
+                            if (value.toInt() >= 0 &&
+                                value.toInt() < types.length) {
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  types[value.toInt()],
+                                  style: const TextStyle(fontSize: 10),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               );
-                            },
-                          ),
-                        ),
-                        bottomTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            getTitlesWidget: (value, meta) {
-                              final facilities = _stats!.paymentsByFacility.keys.toList();
-                              if (value.toInt() >= 0 && value.toInt() < facilities.length) {
-                                return Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Text(
-                                    facilities[value.toInt()],
-                                    style: const TextStyle(fontSize: 10),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                );
-                              }
-                              return const Text('');
-                            },
-                          ),
-                        ),
-                        rightTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
-                        ),
-                        topTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false),
+                            }
+                            return const Text('');
+                          },
                         ),
                       ),
-                      gridData: FlGridData(
-                        show: true,
-                        drawVerticalLine: false,
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
                       ),
-                      borderData: FlBorderData(show: false),
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                    ),
+                    gridData: FlGridData(show: true, drawVerticalLine: false),
+                    borderData: FlBorderData(show: false),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Visitors by Age Category
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Visitors by Age Category',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 200,
+                child: PieChart(
+                  PieChartData(
+                    sections: _buildPieChartSections(
+                      _stats!.visitorsByAgeCategory,
+                    ),
+                    sectionsSpace: 2,
+                    centerSpaceRadius: 50,
+                    borderData: FlBorderData(show: false),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              ..._buildLegend(_stats!.visitorsByAgeCategory),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Payments by Age Category
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Payments by Age Category',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 250,
+                child: BarChart(
+                  BarChartData(
+                    alignment: BarChartAlignment.spaceAround,
+                    maxY: _getMaxPayment(_stats!.paymentsByAgeCategory) * 1.2,
+                    barGroups: _buildBarChartGroups(
+                      _stats!.paymentsByAgeCategory,
+                    ),
+                    titlesData: FlTitlesData(
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 50,
+                          getTitlesWidget: (value, meta) {
+                            return Text(
+                              '₱${NumberFormat.compact().format(value)}',
+                              style: const TextStyle(fontSize: 10),
+                            );
+                          },
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            final categories = _stats!
+                                .paymentsByAgeCategory
+                                .keys
+                                .toList();
+                            if (value.toInt() >= 0 &&
+                                value.toInt() < categories.length) {
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  categories[value.toInt()],
+                                  style: const TextStyle(fontSize: 10),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              );
+                            }
+                            return const Text('');
+                          },
+                        ),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                    ),
+                    gridData: FlGridData(show: true, drawVerticalLine: false),
+                    borderData: FlBorderData(show: false),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Below 12 vs 12 and Above Summary
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Visitor Age Groups',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildAgeGroupCard(
+                      'Below 12',
+                      _stats!.visitorsBelow12,
+                      '₱${NumberFormat('#,##0.00').format(_stats!.paymentBelowGroup)}',
+                      Colors.blue.shade600,
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildAgeGroupCard(
+                      '12 and Above',
+                      _stats!.visitorsAbove12,
+                      '₱${NumberFormat('#,##0.00').format(_stats!.paymentAboveGroup)}',
+                      Colors.green.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAgeGroupCard(
+    String label,
+    int visitors,
+    String payment,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$visitors',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'visitors',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              payment,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
             ),
           ),
         ],
-      ],
+      ),
     );
   }
 
@@ -671,6 +1139,22 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       Colors.pink.shade600,
       Colors.amber.shade700,
     ];
+
+    if (data.isEmpty) {
+      return [
+        PieChartSectionData(
+          value: 1,
+          color: Colors.grey.shade300,
+          radius: 60,
+          title: 'No Data',
+          titleStyle: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey.shade600,
+          ),
+        ),
+      ];
+    }
 
     int index = 0;
     return data.entries.map((entry) {
@@ -698,9 +1182,27 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       Colors.purple.shade600,
       Colors.red.shade600,
       Colors.teal.shade600,
-      Colors.pink.shade600,
+      Colors.pink.shade700,
       Colors.amber.shade700,
     ];
+
+    if (data.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Center(
+            child: Text(
+              'No data available',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade500,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ),
+      ];
+    }
 
     int index = 0;
     return data.entries.map((entry) {
@@ -713,24 +1215,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             Container(
               width: 16,
               height: 16,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-              ),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                entry.key,
-                style: const TextStyle(fontSize: 13),
-              ),
+              child: Text(entry.key, style: const TextStyle(fontSize: 13)),
             ),
             Text(
               '${entry.value} visitors',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -749,6 +1242,25 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       Colors.pink.shade600,
       Colors.amber.shade700,
     ];
+
+    if (data.isEmpty) {
+      // Return a placeholder bar showing "No Data"
+      return [
+        BarChartGroupData(
+          x: 0,
+          barRods: [
+            BarChartRodData(
+              toY: 0,
+              color: Colors.grey.shade300,
+              width: 20,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      ];
+    }
 
     int index = 0;
     return data.entries.map((entry) {
@@ -773,6 +1285,4 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     if (data.isEmpty) return 100;
     return data.values.reduce((a, b) => a > b ? a : b);
   }
-
-
 }

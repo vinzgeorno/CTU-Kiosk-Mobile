@@ -25,18 +25,24 @@ class TicketDetailScreen extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: ticket.isValid ? Colors.green.shade700 : Colors.red.shade700,
+                color: ticket.transactionStatus == 'completed'
+                    ? Colors.green.shade700
+                    : Colors.orange.shade700,
               ),
               child: Column(
                 children: [
                   Icon(
-                    ticket.isValid ? Icons.check_circle_outline : Icons.cancel_outlined,
+                    ticket.transactionStatus == 'completed'
+                        ? Icons.check_circle_outline
+                        : Icons.info_outline,
                     size: 64,
                     color: Colors.white,
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    ticket.isValid ? 'VALID TICKET' : 'INVALID TICKET',
+                    ticket.transactionStatus == 'completed'
+                        ? 'COMPLETED'
+                        : ticket.transactionStatus.toUpperCase(),
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -57,107 +63,22 @@ class TicketDetailScreen extends StatelessWidget {
               ),
             ),
 
-            // Captured Image (if available)
-            if (ticket.imageUrl != null) ...[
-              Container(
-                margin: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          Icon(Icons.photo_camera, color: Colors.blue.shade700),
-                          const SizedBox(width: 12),
-                          const Text(
-                            'Captured Image',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    ClipRRect(
-                      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-                      child: Image.network(
-                        ticket.imageUrl!,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return Container(
-                            height: 200,
-                            alignment: Alignment.center,
-                            child: CircularProgressIndicator(
-                              value: loadingProgress.expectedTotalBytes != null
-                                  ? loadingProgress.cumulativeBytesLoaded /
-                                      loadingProgress.expectedTotalBytes!
-                                  : null,
-                            ),
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            height: 200,
-                            color: Colors.grey.shade200,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.broken_image, size: 48, color: Colors.grey.shade400),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Failed to load image',
-                                  style: TextStyle(color: Colors.grey.shade600),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            // Customer Information
-            _buildSection(
-              context,
-              'Customer Information',
-              Icons.person_outline,
-              [
-                _buildDetailRow('Full Name', ticket.name),
-                if (ticket.email != null) _buildDetailRow('Email', ticket.email!),
-                if (ticket.phone != null) _buildDetailRow('Phone', ticket.phone!),
-              ],
-            ),
-
             // Visit Information
-            _buildSection(
-              context,
-              'Visit Information',
-              Icons.info_outline,
-              [
-                _buildDetailRow('Facility', ticket.facility),
-                _buildDetailRow('Amount', '₱${NumberFormat('#,##0.00').format(ticket.amount)}'),
-                _buildDetailRow('Visit Date', DateFormat('MMMM dd, yyyy').format(ticket.visitDate)),
-                _buildDetailRow('Visit Time', DateFormat('hh:mm a').format(ticket.visitDate)),
-              ],
-            ),
+            _buildSection(context, 'Visit Information', Icons.info_outline, [
+              _buildDetailRow('Facility', ticket.facility),
+              _buildDetailRow(
+                'Amount',
+                '₱${NumberFormat('#,##0.00').format(ticket.amount)}',
+              ),
+              _buildDetailRow(
+                'Visit Date',
+                DateFormat('MMMM dd, yyyy').format(ticket.visitDate),
+              ),
+              _buildDetailRow(
+                'Visit Time',
+                DateFormat('hh:mm a').format(ticket.visitDate),
+              ),
+            ]),
 
             // Ticket Information
             _buildSection(
@@ -166,8 +87,16 @@ class TicketDetailScreen extends StatelessWidget {
               Icons.confirmation_number_outlined,
               [
                 _buildDetailRow('Reference Number', ticket.referenceNumber),
-                _buildDetailRow('Created At', DateFormat('MMM dd, yyyy hh:mm a').format(ticket.createdAt)),
-                _buildDetailRow('Status', ticket.isValid ? 'Valid' : 'Invalid'),
+                _buildDetailRow(
+                  'Created At',
+                  DateFormat('MMM dd, yyyy hh:mm a').format(ticket.createdAt),
+                ),
+                _buildDetailRow(
+                  'Status',
+                  ticket.transactionStatus == 'completed'
+                      ? 'Completed'
+                      : ticket.transactionStatus,
+                ),
               ],
             ),
 
@@ -178,7 +107,12 @@ class TicketDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSection(BuildContext context, String title, IconData icon, List<Widget> children) {
+  Widget _buildSection(
+    BuildContext context,
+    String title,
+    IconData icon,
+    List<Widget> children,
+  ) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       decoration: BoxDecoration(
@@ -214,9 +148,7 @@ class TicketDetailScreen extends StatelessWidget {
           Divider(color: Colors.grey.shade200, height: 1),
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              children: children,
-            ),
+            child: Column(children: children),
           ),
         ],
       ),
@@ -233,10 +165,7 @@ class TicketDetailScreen extends StatelessWidget {
             width: 120,
             child: Text(
               label,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey.shade600,
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
             ),
           ),
           Expanded(

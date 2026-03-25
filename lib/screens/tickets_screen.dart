@@ -7,11 +7,13 @@ import 'ticket_detail_screen.dart';
 class TicketsScreen extends StatefulWidget {
   final int selectedPeriod; // 0: Today, 1: Week, 2: Month
   final int selectedMonth;
+  final int selectedYear;
 
   const TicketsScreen({
     super.key,
     required this.selectedPeriod,
     required this.selectedMonth,
+    required this.selectedYear,
   });
 
   @override
@@ -34,7 +36,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
     setState(() => _isLoading = true);
     try {
       List<TicketCache> tickets;
-      final now = DateTime.now();
 
       switch (widget.selectedPeriod) {
         case 0: // Today
@@ -44,7 +45,10 @@ class _TicketsScreenState extends State<TicketsScreen> {
           tickets = await _localDb.getWeekTickets();
           break;
         case 2: // This Month
-          tickets = await _localDb.getMonthTickets(now.year, widget.selectedMonth);
+          tickets = await _localDb.getMonthTickets(
+            widget.selectedYear,
+            widget.selectedMonth,
+          );
           break;
         default:
           tickets = [];
@@ -57,21 +61,20 @@ class _TicketsScreenState extends State<TicketsScreen> {
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading tickets: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading tickets: $e')));
       }
     }
   }
 
   List<TicketCache> get _filteredTickets {
     if (_searchQuery.isEmpty) return _tickets;
-    
+
     return _tickets.where((ticket) {
       final query = _searchQuery.toLowerCase();
       return ticket.referenceNumber.toLowerCase().contains(query) ||
-             ticket.name.toLowerCase().contains(query) ||
-             ticket.facility.toLowerCase().contains(query);
+          ticket.facility.toLowerCase().contains(query);
     }).toList();
   }
 
@@ -107,7 +110,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
                 });
               },
               decoration: InputDecoration(
-                hintText: 'Search by reference, name, or facility...',
+                hintText: 'Search by reference or facility...',
                 prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
@@ -125,7 +128,10 @@ class _TicketsScreenState extends State<TicketsScreen> {
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
             ),
           ),
@@ -148,10 +154,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
                 if (_searchQuery.isNotEmpty)
                   Text(
                     'Filtered from ${_tickets.length}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey.shade500,
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                   ),
               ],
             ),
@@ -164,20 +167,20 @@ class _TicketsScreenState extends State<TicketsScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _filteredTickets.isEmpty
-                    ? _buildEmptyState()
-                    : RefreshIndicator(
-                        onRefresh: () async {
-                          await _localDb.syncFromSupabase(force: true);
-                          await _loadTickets();
-                        },
-                        child: ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _filteredTickets.length,
-                          itemBuilder: (context, index) {
-                            return _buildTicketCard(_filteredTickets[index]);
-                          },
-                        ),
-                      ),
+                ? _buildEmptyState()
+                : RefreshIndicator(
+                    onRefresh: () async {
+                      await _localDb.syncFromSupabase(force: true);
+                      await _loadTickets();
+                    },
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _filteredTickets.length,
+                      itemBuilder: (context, index) {
+                        return _buildTicketCard(_filteredTickets[index]);
+                      },
+                    ),
+                  ),
           ),
         ],
       ),
@@ -190,13 +193,17 @@ class _TicketsScreenState extends State<TicketsScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            _searchQuery.isNotEmpty ? Icons.search_off : Icons.receipt_long_outlined,
+            _searchQuery.isNotEmpty
+                ? Icons.search_off
+                : Icons.receipt_long_outlined,
             size: 64,
             color: Colors.grey.shade400,
           ),
           const SizedBox(height: 16),
           Text(
-            _searchQuery.isNotEmpty ? 'No tickets match your search' : 'No tickets found',
+            _searchQuery.isNotEmpty
+                ? 'No tickets match your search'
+                : 'No tickets found',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -208,10 +215,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
             _searchQuery.isNotEmpty
                 ? 'Try a different search term'
                 : 'Tickets will appear here when available',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade500,
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
           ),
         ],
       ),
@@ -266,7 +270,9 @@ class _TicketsScreenState extends State<TicketsScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            ticket.name,
+                            ticket.age != null
+                                ? 'Age: ${ticket.age}'
+                                : 'Age: Not provided',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.grey.shade600,
@@ -276,17 +282,26 @@ class _TicketsScreenState extends State<TicketsScreen> {
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                        color: ticket.isValid ? Colors.green.shade50 : Colors.red.shade50,
+                        color: ticket.transactionStatus == 'completed'
+                            ? Colors.green.shade50
+                            : Colors.orange.shade50,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        ticket.isValid ? 'Valid' : 'Invalid',
+                        ticket.transactionStatus == 'completed'
+                            ? 'Completed'
+                            : ticket.transactionStatus,
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: ticket.isValid ? Colors.green.shade700 : Colors.red.shade700,
+                          color: ticket.transactionStatus == 'completed'
+                              ? Colors.green.shade700
+                              : Colors.orange.shade700,
                         ),
                       ),
                     ),
@@ -332,25 +347,6 @@ class _TicketsScreenState extends State<TicketsScreen> {
                     ),
                   ],
                 ),
-                if (ticket.imageUrl != null) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Icon(Icons.image_outlined, size: 16, color: Colors.blue.shade700),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Has image',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue.shade700,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const Spacer(),
-                      Icon(Icons.chevron_right, color: Colors.grey.shade400),
-                    ],
-                  ),
-                ],
               ],
             ),
           ),
@@ -370,10 +366,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
             children: [
               Text(
                 label,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.grey.shade500,
-                ),
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               ),
               Text(
                 value,

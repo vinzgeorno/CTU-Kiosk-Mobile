@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/ticket.dart';
+import '../models/ticket_cache.dart';
 
 class TicketValidationDialog extends StatefulWidget {
-  final Ticket ticket;
+  final dynamic ticket; // Accepts both Ticket and TicketCache
 
   const TicketValidationDialog({super.key, required this.ticket});
 
@@ -12,64 +13,207 @@ class TicketValidationDialog extends StatefulWidget {
 }
 
 class _TicketValidationDialogState extends State<TicketValidationDialog> {
+  bool get _isFromCache => widget.ticket is TicketCache;
+
+  String get _referenceNumber {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).referenceNumber;
+    }
+    return (widget.ticket as Ticket).referenceNumber;
+  }
+
+  int? get _age {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).age;
+    }
+    return (widget.ticket as Ticket).age;
+  }
+
+  String? get _ageCategory {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).ageCategory;
+    }
+    return (widget.ticket as Ticket).ageCategory;
+  }
+
+  String _getAgeDisplay() {
+    // If age category is provided, use it
+    if (_ageCategory != null && _ageCategory!.isNotEmpty) {
+      return _ageCategory!;
+    }
+    // If age is provided, categorize it
+    if (_age != null) {
+      if (_age! <= 11) {
+        return '11 and below';
+      } else {
+        return '12 and above';
+      }
+    }
+    return 'Not specified';
+  }
+
+  String get _facility {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).facility;
+    }
+    return (widget.ticket as Ticket).facility;
+  }
+
+  double get _amountPaid {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).amount;
+    }
+    return (widget.ticket as Ticket).amountPaid;
+  }
+
+  double? get _amountDue {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).amountDue;
+    }
+    return (widget.ticket as Ticket).amountDue;
+  }
+
+  double? get _changeAmount {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).changeAmount;
+    }
+    return (widget.ticket as Ticket).changeAmount;
+  }
+
+  String? get _ticketType {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).ticketType;
+    }
+    return (widget.ticket as Ticket).ticketType;
+  }
+
+  bool? get _isClubMember {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).isClubMember;
+    }
+    return (widget.ticket as Ticket).isClubMember;
+  }
+
+  bool? get _isResident {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).isResident;
+    }
+    return (widget.ticket as Ticket).isResident;
+  }
+
+  int? get _totalPeople {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).totalPeople;
+    }
+    return (widget.ticket as Ticket).totalPeople;
+  }
+
+  int? get _peopleBelow12 {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).peopleBelow12;
+    }
+    return (widget.ticket as Ticket).peopleBelow12;
+  }
+
+  int? get _people12Above {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).people12Above;
+    }
+    return (widget.ticket as Ticket).people12Above;
+  }
+
+  DateTime get _createdAt {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).createdAt;
+    }
+    return (widget.ticket as Ticket).createdAt;
+  }
+
+  String get _status {
+    if (widget.ticket is TicketCache) {
+      return (widget.ticket as TicketCache).transactionStatus;
+    }
+    return (widget.ticket as Ticket).transactionStatus;
+  }
+
+  bool get _isMembershipFacility {
+    final facilityLower = _facility.toLowerCase();
+    return facilityLower.contains('badminton') ||
+        facilityLower.contains('tennis') ||
+        facilityLower.contains('water essence');
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isValid = widget.ticket.isValid;
     final dateFormat = DateFormat('MMM dd, yyyy hh:mm a');
+    final isValidStatus =
+        _status.toLowerCase().contains('complete') ||
+        _status.toLowerCase().contains('paid');
 
     return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Cache Badge
+            if (_isFromCache)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade100,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.offline_bolt,
+                      size: 14,
+                      color: Colors.blue.shade700,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'From Local Cache',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_isFromCache) const SizedBox(height: 12),
+
             // Status Icon
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: isValid ? Colors.green.shade50 : Colors.red.shade50,
+                color: isValidStatus
+                    ? Colors.green.shade50
+                    : Colors.orange.shade50,
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                isValid ? Icons.check_circle : Icons.cancel,
+                isValidStatus ? Icons.check_circle : Icons.info,
                 size: 64,
-                color: isValid ? Colors.green : Colors.red,
+                color: isValidStatus ? Colors.green : Colors.orange,
               ),
             ),
             const SizedBox(height: 16),
 
             // Status Text
             Text(
-              isValid ? 'Valid Ticket' : widget.ticket.isExpired ? 'Expired Ticket' : 'Invalid Ticket',
+              _status.toUpperCase(),
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: isValid ? Colors.green : Colors.red,
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Expiry Status
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: isValid ? Colors.green.shade50 : Colors.red.shade50,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isValid ? Colors.green.shade200 : Colors.red.shade200,
-                  width: 1,
-                ),
-              ),
-              child: Text(
-                widget.ticket.expiryStatus,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isValid ? Colors.green.shade700 : Colors.red.shade700,
-                ),
+                color: isValidStatus ? Colors.green : Colors.orange,
               ),
             ),
             const SizedBox(height: 24),
@@ -81,7 +225,7 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
                 borderRadius: BorderRadius.circular(12),
               ),
               constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.4,
+                maxHeight: MediaQuery.of(context).size.height * 0.5,
               ),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
@@ -90,60 +234,109 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
                   children: [
                     _buildDetailRow(
                       'Reference Number',
-                      widget.ticket.referenceNumber,
+                      _referenceNumber,
                       Icons.confirmation_number,
                     ),
                     const Divider(height: 24),
+                    _buildDetailRow('Facility', _facility, Icons.location_on),
+                    const Divider(height: 24),
+                    // Age Display (using helper)
                     _buildDetailRow(
-                      'Name',
-                      widget.ticket.name,
+                      'Age Category',
+                      _getAgeDisplay(),
                       Icons.person,
                     ),
-                    if (widget.ticket.age != null) ...[
-                      const Divider(height: 24),
-                      _buildDetailRow(
-                        'Age',
-                        '${widget.ticket.age} years old',
-                        Icons.cake,
-                      ),
-                    ],
                     const Divider(height: 24),
-                    _buildDetailRow(
-                      'Facility',
-                      widget.ticket.facility,
-                      Icons.location_on,
-                    ),
-                    const Divider(height: 24),
+                    // Visit Information Section - Amount Details
+                    _buildSectionHeader('Visit Information'),
+                    const SizedBox(height: 12),
                     _buildDetailRow(
                       'Amount Paid',
-                      '₱${widget.ticket.paymentAmount.toStringAsFixed(2)}',
-                      Icons.payments,
+                      '₱$_amountPaid',
+                      Icons.attach_money,
                     ),
-                    if (widget.ticket.hasDiscount && widget.ticket.originalPrice != null) ...[
+                    if (_amountDue != null && _amountDue! > 0) ...[
                       const Divider(height: 24),
                       _buildDetailRow(
-                        'Original Price',
-                        '₱${widget.ticket.originalPrice!.toStringAsFixed(2)}',
-                        Icons.discount,
+                        'Amount Due',
+                        '₱$_amountDue',
+                        Icons.receipt_long,
                       ),
+                    ],
+                    if (_changeAmount != null && _changeAmount! > 0) ...[
+                      const Divider(height: 24),
+                      _buildDetailRow(
+                        'Change Amount',
+                        '₱$_changeAmount',
+                        Icons.monetization_on,
+                      ),
+                    ],
+                    // Ticket Information Section
+                    const Divider(height: 24),
+                    _buildSectionHeader('Ticket Information'),
+                    const SizedBox(height: 12),
+                    _buildDetailRow(
+                      'Date Created',
+                      dateFormat.format(_createdAt),
+                      Icons.calendar_today,
+                    ),
+                    // Ticket Type
+                    if (_ticketType != null) ...[
+                      const Divider(height: 24),
+                      _buildDetailRow(
+                        'Ticket Type',
+                        _ticketType!.toUpperCase(),
+                        Icons.sell,
+                      ),
+                      const Divider(height: 24),
+                    ] else
+                      const Divider(height: 24),
+                    // Group Details
+                    if (_totalPeople != null && _totalPeople! > 1) ...[
+                      _buildDetailRow(
+                        'Total People',
+                        '$_totalPeople people',
+                        Icons.people,
+                      ),
+                      const Divider(height: 24),
+                      if (_peopleBelow12 != null)
+                        _buildDetailRow(
+                          'Below 12 years',
+                          '$_peopleBelow12 person(s)',
+                          Icons.child_care,
+                        ),
+                      if (_peopleBelow12 != null) const Divider(height: 24),
+                      if (_people12Above != null)
+                        _buildDetailRow(
+                          '12 years & above',
+                          '$_people12Above person(s)',
+                          Icons.person_outline,
+                        ),
+                      if (_people12Above != null) const Divider(height: 24),
+                    ],
+                    // Membership Info
+                    if (_isMembershipFacility) ...[
+                      const Divider(height: 24),
+                      if (_isClubMember != null)
+                        _buildDetailRow(
+                          'Club Member',
+                          _isClubMember! ? '✓ Yes' : '✗ No',
+                          Icons.card_membership,
+                        ),
+                      if (_isClubMember != null && _isResident != null)
+                        const Divider(height: 24),
+                      if (_isResident != null)
+                        _buildDetailRow(
+                          'Resident',
+                          _isResident! ? '✓ Yes' : '✗ No',
+                          Icons.home,
+                        ),
                     ],
                     const Divider(height: 24),
                     _buildDetailRow(
                       'Date Created',
-                      dateFormat.format(widget.ticket.dateCreated),
+                      dateFormat.format(_createdAt),
                       Icons.calendar_today,
-                    ),
-                    const Divider(height: 24),
-                    _buildDetailRow(
-                      'Expiry Date',
-                      dateFormat.format(widget.ticket.dateExpiry),
-                      Icons.event_busy,
-                    ),
-                    const Divider(height: 24),
-                    _buildDetailRow(
-                      'Status',
-                      widget.ticket.transactionStatus.toUpperCase(),
-                      Icons.info,
                     ),
                   ],
                 ),
@@ -157,14 +350,14 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
               child: ElevatedButton(
                 onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isValid ? Colors.green : Colors.grey,
+                  backgroundColor: isValidStatus ? Colors.green : Colors.grey,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: Text(
-                  isValid ? 'Accept & Close' : 'Close',
+                  isValidStatus ? 'Accept & Close' : 'Close',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -176,6 +369,30 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 24,
+          decoration: BoxDecoration(
+            color: Colors.blue.shade600,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: Colors.blue.shade600,
+          ),
+        ),
+      ],
     );
   }
 
@@ -194,10 +411,7 @@ class _TicketValidationDialogState extends State<TicketValidationDialog> {
             children: [
               Text(
                 label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
               const SizedBox(height: 2),
               Text(
