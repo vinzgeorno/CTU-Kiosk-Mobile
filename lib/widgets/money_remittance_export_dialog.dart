@@ -20,23 +20,86 @@ class MoneyRemittanceExportDialog extends StatefulWidget {
       _MoneyRemittanceExportDialogState();
 }
 
+class _RemittancePreset {
+  final String label;
+  final int start;
+  final int end;
+  final bool overnight;
+
+  const _RemittancePreset({
+    required this.label,
+    required this.start,
+    required this.end,
+    required this.overnight,
+  });
+}
+
+const _kPresets = [
+  _RemittancePreset(
+    label: 'Day shift (8:00 AM – 4:00 PM, Taipei)',
+    start: 8,
+    end: 16,
+    overnight: false,
+  ),
+  _RemittancePreset(
+    label: 'Night shift (4:00 PM – 8:00 AM next day, Taipei)',
+    start: 16,
+    end: 8,
+    overnight: true,
+  ),
+];
+
 class _MoneyRemittanceExportDialogState
     extends State<MoneyRemittanceExportDialog> {
   final ExportService _exportService = ExportService();
 
   DateTime _selectedDate = DateTime.now();
-  String _selectedRange = 'Full Day (6am-10pm)';
-  int _startHour = 6;
-  int _endHour = 22;
+  late String _selectedRange = _kPresets.first.label;
+  int _startHour = _kPresets.first.start;
+  int _endHour = _kPresets.first.end;
+  bool _overnight = _kPresets.first.overnight;
   bool _isCustomRange = false;
   bool _isGenerating = false;
 
-  final predefinedRanges = {
-    'Morning (6am-12pm)': {'start': 6, 'end': 12},
-    'Afternoon (12pm-6pm)': {'start': 12, 'end': 18},
-    'Evening (6pm-10pm)': {'start': 18, 'end': 22},
-    'Full Day (6am-10pm)': {'start': 6, 'end': 22},
-  };
+  /// SnackBars render under dialog routes; use root [Overlay] so feedback stays on top.
+  void _showBannerOnTop(
+    String message, {
+    required Color backgroundColor,
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    if (!mounted) return;
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final bottomPad = MediaQuery.paddingOf(context).bottom;
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (ctx) => Positioned(
+        left: 12,
+        right: 12,
+        bottom: 16 + bottomPad,
+        child: Material(
+          color: backgroundColor,
+          elevation: 12,
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    Future<void>.delayed(duration, () {
+      entry.remove();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -122,6 +185,7 @@ class _MoneyRemittanceExportDialogState
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
+                key: ValueKey('preset_${_selectedRange}_$_isCustomRange'),
                 initialValue: _selectedRange,
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
@@ -130,23 +194,31 @@ class _MoneyRemittanceExportDialogState
                   filled: true,
                   fillColor: Colors.grey[50],
                 ),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _selectedRange = value;
-                      _isCustomRange = false;
-                      final range = predefinedRanges[value];
-                      if (range != null) {
-                        _startHour = range['start'] ?? 6;
-                        _endHour = range['end'] ?? 22;
-                      }
-                    });
-                  }
-                },
-                items: predefinedRanges.keys
+                onChanged: _isCustomRange
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          final preset = _kPresets.firstWhere(
+                            (p) => p.label == value,
+                          );
+                          setState(() {
+                            _selectedRange = value;
+                            _startHour = preset.start;
+                            _endHour = preset.end;
+                            _overnight = preset.overnight;
+                          });
+                        }
+                      },
+                items: _kPresets
                     .map(
-                      (range) =>
-                          DropdownMenuItem(value: range, child: Text(range)),
+                      (p) => DropdownMenuItem<String>(
+                        value: p.label,
+                        child: Text(
+                          p.label,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                        ),
+                      ),
                     )
                     .toList(),
               ),
@@ -154,10 +226,30 @@ class _MoneyRemittanceExportDialogState
 
               // Custom Range Toggle
               CheckboxListTile(
-                title: const Text('Custom Time Range'),
+                title: const Text('Custom time (same Taipei day, start ≤ end hour)'),
                 value: _isCustomRange,
                 onChanged: (value) {
-                  setState(() => _isCustomRange = value ?? false);
+                  final on = value ?? false;
+                  setState(() {
+                    _isCustomRange = on;
+                    if (!on) {
+                      final preset = _kPresets.firstWhere(
+                        (p) => p.label == _selectedRange,
+                      );
+                      _startHour = preset.start;
+                      _endHour = preset.end;
+                      _overnight = preset.overnight;
+                    } else {
+                      _overnight = false;
+                      if (!_exportService.isValidHourRange(
+                            _startHour,
+                            _endHour,
+                          )) {
+                        _startHour = 8;
+                        _endHour = 16;
+                      }
+                    }
+                  });
                 },
                 contentPadding: EdgeInsets.zero,
               ),
@@ -236,7 +328,7 @@ class _MoneyRemittanceExportDialogState
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Export will generate CSV with summary and detailed ticket records ready for printing.',
+                        'Times use Asia/Taipei. Day shift is 8:00–16:59 on the selected date; night shift is from 16:00 that date through before 08:00 the next day.',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.blue.shade700,
@@ -285,14 +377,11 @@ class _MoneyRemittanceExportDialogState
   }
 
   Future<void> _generateExport() async {
-    if (!_exportService.isValidHourRange(_startHour, _endHour)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Invalid hour range. Start hour must be <= End hour.',
-          ),
-          backgroundColor: Colors.red,
-        ),
+    if (_isCustomRange &&
+        !_exportService.isValidHourRange(_startHour, _endHour)) {
+      _showBannerOnTop(
+        'Invalid hour range. Start hour must be ≤ end hour (same Taipei day).',
+        backgroundColor: Colors.red.shade700,
       );
       return;
     }
@@ -300,23 +389,20 @@ class _MoneyRemittanceExportDialogState
     setState(() => _isGenerating = true);
 
     try {
-      // Filter tickets for selected date and time range
+      // Filter tickets for selected date and time range (Asia/Taipei)
       final filteredTickets = await _exportService.getTicketsForHourRange(
         widget.allTickets,
         date: _selectedDate,
         startHour: _startHour,
         endHour: _endHour,
+        overnight: _overnight,
       );
 
       if (filteredTickets.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text(
-                'No tickets found for selected date and time range.',
-              ),
-              backgroundColor: Colors.orange,
-            ),
+          _showBannerOnTop(
+            'No tickets found for selected date and time range.',
+            backgroundColor: Colors.orange.shade800,
           );
         }
         setState(() => _isGenerating = false);
@@ -324,10 +410,13 @@ class _MoneyRemittanceExportDialogState
       }
 
       // Generate CSV
+      final suffix = _overnight
+          ? '$_startHour-${_endHour}_overnight'
+          : '$_startHour-$_endHour';
       final csv = await _exportService.generateCsvExport(
         filteredTickets,
         filename:
-            'remittance_${DateFormat('yyyyMMdd').format(_selectedDate)}_$_startHour-$_endHour.csv',
+            'remittance_${DateFormat('yyyyMMdd').format(_selectedDate)}_$suffix.csv',
       );
 
       if (mounted) {
@@ -336,11 +425,9 @@ class _MoneyRemittanceExportDialogState
     } catch (e) {
       debugPrint('Error generating export: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error generating export: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _showBannerOnTop(
+          'Error generating export: $e',
+          backgroundColor: Colors.red.shade700,
         );
       }
     } finally {
@@ -351,6 +438,7 @@ class _MoneyRemittanceExportDialogState
   void _showExportPreview(String csvContent, int ticketCount) {
     showDialog(
       context: context,
+      useRootNavigator: true,
       barrierDismissible: true,
       barrierColor: Colors.black.withValues(alpha: 0.5),
       builder: (context) => Dialog(
@@ -373,7 +461,9 @@ class _MoneyRemittanceExportDialogState
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Tickets: $ticketCount\nDate: ${DateFormat('MMMM dd, yyyy').format(_selectedDate)}\nTime: $_startHour:00 - $_endHour:59',
+                    'Tickets: $ticketCount\n'
+                    'Date: ${DateFormat('MMMM dd, yyyy').format(_selectedDate)}\n'
+                    '${_overnight ? 'Time (Taipei): $_startHour:00 on date shown → before $_endHour:00 next day' : 'Time (Taipei): $_startHour:00–$_endHour:59'}',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.grey[700]),
                   ),
@@ -434,22 +524,18 @@ class _MoneyRemittanceExportDialogState
       // Copy to clipboard using Flutter's Clipboard API (works on all platforms)
       await Clipboard.setData(ClipboardData(text: csvContent));
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✓ CSV copied to clipboard successfully!'),
-            duration: Duration(seconds: 2),
-            backgroundColor: Colors.green,
-          ),
+        _showBannerOnTop(
+          '✓ CSV copied to clipboard successfully!',
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 2),
         );
       }
     } catch (e) {
       debugPrint('Error copying to clipboard: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error copying to clipboard: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _showBannerOnTop(
+          'Error copying to clipboard: $e',
+          backgroundColor: Colors.red.shade700,
         );
       }
     }
@@ -460,13 +546,9 @@ class _MoneyRemittanceExportDialogState
       // Skip on web platform - web doesn't have document directories
       if (!Platform.isAndroid && !Platform.isIOS) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Download not available on this platform. Use "Copy to Clipboard" or "Share" instead.',
-              ),
-              backgroundColor: Colors.orange,
-            ),
+          _showBannerOnTop(
+            'Download not available on this platform. Use "Copy to Clipboard" or "Share" instead.',
+            backgroundColor: Colors.orange.shade800,
           );
         }
         return;
@@ -492,11 +574,9 @@ class _MoneyRemittanceExportDialogState
     } catch (e) {
       debugPrint('Error saving CSV: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving CSV: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _showBannerOnTop(
+          'Error saving CSV: $e',
+          backgroundColor: Colors.red.shade700,
         );
       }
     }
@@ -508,6 +588,7 @@ class _MoneyRemittanceExportDialogState
 
     showDialog(
       context: context,
+      useRootNavigator: true,
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
@@ -669,11 +750,9 @@ class _MoneyRemittanceExportDialogState
     } catch (e) {
       debugPrint('Error opening file: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error opening file: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _showBannerOnTop(
+          'Error opening file: $e',
+          backgroundColor: Colors.red.shade700,
         );
       }
     }
@@ -687,11 +766,9 @@ class _MoneyRemittanceExportDialogState
     } catch (e) {
       debugPrint('Error sharing file: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error sharing file: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _showBannerOnTop(
+          'Error sharing file: $e',
+          backgroundColor: Colors.red.shade700,
         );
       }
     }
@@ -740,23 +817,18 @@ class _MoneyRemittanceExportDialogState
       );
 
       if (mounted) {
-        // ignore: use_build_context_synchronously
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✓ CSV sent to printer'),
-            backgroundColor: Colors.green,
-          ),
+        _showBannerOnTop(
+          '✓ CSV sent to printer',
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 2),
         );
       }
     } catch (e) {
       debugPrint('Error printing CSV: $e');
       if (mounted) {
-        // ignore: use_build_context_synchronously
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error printing CSV: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _showBannerOnTop(
+          'Error printing CSV: $e',
+          backgroundColor: Colors.red.shade700,
         );
       }
     }
@@ -767,11 +839,10 @@ class _MoneyRemittanceExportDialogState
       if (await file.exists()) {
         await file.delete();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✓ CSV file deleted'),
-              backgroundColor: Colors.green,
-            ),
+          _showBannerOnTop(
+            '✓ CSV file deleted',
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 2),
           );
         }
         debugPrint('CSV file deleted: ${file.path}');
@@ -779,11 +850,9 @@ class _MoneyRemittanceExportDialogState
     } catch (e) {
       debugPrint('Error deleting file: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error deleting file: $e'),
-            backgroundColor: Colors.red,
-          ),
+        _showBannerOnTop(
+          'Error deleting file: $e',
+          backgroundColor: Colors.red.shade700,
         );
       }
     }

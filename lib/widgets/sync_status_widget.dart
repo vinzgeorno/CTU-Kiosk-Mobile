@@ -1,66 +1,48 @@
 import 'package:flutter/material.dart';
-import '../services/local_database_service.dart';
+import '../services/supabase_service.dart';
 
-class SyncStatusWidget extends StatefulWidget {
+class SyncStatusWidget extends StatelessWidget {
   const SyncStatusWidget({super.key});
 
   @override
-  State<SyncStatusWidget> createState() => _SyncStatusWidgetState();
-}
-
-class _SyncStatusWidgetState extends State<SyncStatusWidget> {
-  final LocalDatabaseService _localDb = LocalDatabaseService();
-  late Future<Map<String, dynamic>> _statsFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _statsFuture = _localDb.getCacheStats();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final supabaseService = SupabaseService();
+
     return FutureBuilder<Map<String, dynamic>>(
-      future: _statsFuture,
+      future: supabaseService.getLiveStatus(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const SizedBox.shrink();
         }
 
-        final stats = snapshot.data!;
-        final lastSync = stats['lastSync'] as DateTime?;
-        final ticketCount = stats['ticketCount'] as int? ?? 0;
+        final status = snapshot.data!;
+        final isConnected = status['isConnected'] as bool? ?? false;
+        final lastRefresh = status['lastSuccessfulRefresh'] as DateTime?;
 
-        String syncTimeText = 'Never synced';
-        if (lastSync != null) {
-          final now = DateTime.now();
-          final difference = now.difference(lastSync);
-
-          if (difference.inMinutes < 1) {
-            syncTimeText = 'Just now';
-          } else if (difference.inHours < 1) {
-            syncTimeText = '${difference.inMinutes}m ago';
-          } else if (difference.inHours < 24) {
-            syncTimeText = '${difference.inHours}h ago';
-          } else {
-            syncTimeText = '${difference.inDays}d ago';
-          }
-        }
+        final accent = isConnected ? Colors.green : Colors.orange;
+        final background = isConnected
+            ? Colors.green.shade50
+            : Colors.orange.shade50;
+        final border = isConnected
+            ? Colors.green.shade200
+            : Colors.orange.shade200;
 
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.blue.shade50,
-            border: Border.all(color: Colors.blue.shade200),
+            color: background,
+            border: Border.all(color: border),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
             children: [
               Icon(
-                Icons.cloud_download_outlined,
+                isConnected
+                    ? Icons.cloud_done_outlined
+                    : Icons.cloud_off_outlined,
                 size: 18,
-                color: Colors.blue.shade700,
+                color: accent.shade700,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -69,19 +51,20 @@ class _SyncStatusWidgetState extends State<SyncStatusWidget> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '$ticketCount tickets cached',
+                      isConnected
+                          ? 'Live Supabase data source active'
+                          : 'Supabase is currently unreachable',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: Colors.blue.shade700,
+                        color: accent.shade700,
                       ),
                     ),
                     Text(
-                      'Last sync: $syncTimeText',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.blue.shade600,
-                      ),
+                      lastRefresh == null
+                          ? 'No successful refresh yet'
+                          : 'Last successful refresh: ${_formatElapsed(lastRefresh)}',
+                      style: TextStyle(fontSize: 11, color: accent.shade600),
                     ),
                   ],
                 ),
@@ -91,5 +74,19 @@ class _SyncStatusWidgetState extends State<SyncStatusWidget> {
         );
       },
     );
+  }
+
+  static String _formatElapsed(DateTime timestamp) {
+    final difference = DateTime.now().difference(timestamp);
+    if (difference.inMinutes < 1) {
+      return 'just now';
+    }
+    if (difference.inHours < 1) {
+      return '${difference.inMinutes}m ago';
+    }
+    if (difference.inHours < 24) {
+      return '${difference.inHours}h ago';
+    }
+    return '${difference.inDays}d ago';
   }
 }

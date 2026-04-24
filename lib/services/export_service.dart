@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:timezone/timezone.dart' as tz;
 import '../models/ticket_cache.dart';
+import '../utils/taipei_time.dart';
 
 class ExportService {
   // Generate CSV export for specific hour range
@@ -12,12 +14,12 @@ class ExportService {
     try {
       debugPrint('[Export] Generating CSV export...');
 
-      // Filter tickets by hour range if provided
+      // Filter tickets by hour range if provided (hours interpreted in Taipei)
       List<TicketCache> filteredTickets = tickets;
       if (startHour != null && endHour != null) {
         filteredTickets = _filterByHourRange(tickets, startHour, endHour);
         debugPrint(
-          '[Export] Filtered ${filteredTickets.length} tickets for hours $startHour-$endHour',
+          '[Export] Filtered ${filteredTickets.length} tickets for Taipei hours $startHour-$endHour',
         );
       }
 
@@ -35,14 +37,14 @@ class ExportService {
     }
   }
 
-  // Filter tickets by hour range (e.g., 9-17 for 9 AM to 5 PM)
+  // Filter by hour-of-day in Asia/Taipei (no calendar filter — legacy helper)
   List<TicketCache> _filterByHourRange(
     List<TicketCache> tickets,
     int startHour,
     int endHour,
   ) {
     return tickets.where((ticket) {
-      final hour = ticket.createdAt.hour;
+      final hour = TaipeiTime.toTaipei(ticket.createdAt).hour;
       return hour >= startHour && hour <= endHour;
     }).toList();
   }
@@ -63,7 +65,7 @@ class ExportService {
     int residents = 0;
 
     for (var ticket in tickets) {
-      totalPaid += ticket.amount;
+      totalPaid += ticket.amountDue ?? 0;
       totalDue += ticket.amountDue ?? 0;
       totalChange += ticket.changeAmount ?? 0;
 
@@ -189,27 +191,49 @@ class ExportService {
     return buffer.toString();
   }
 
-  // Get tickets for specific date and hour range
+  /// [date] calendar (year/month/day) is treated as a business date in Asia/Taipei.
+  /// Same-day range: [startHour, endHour] inclusive on that Taipei date.
+  /// Overnight: from [startHour] on that date through before [endHour] on the next Taipei day.
   Future<List<TicketCache>> getTicketsForHourRange(
     List<TicketCache> allTickets, {
     required DateTime date,
     required int startHour,
     required int endHour,
+    bool overnight = false,
   }) async {
-    final dayStart = DateTime(date.year, date.month, date.day);
-    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59);
+    final loc = TaipeiTime.location;
+    final y = date.year;
+    final m = date.month;
+    final d = date.day;
 
     return allTickets.where((ticket) {
-      final isDateMatch =
-          ticket.createdAt.isAfter(dayStart) &&
-          ticket.createdAt.isBefore(dayEnd);
-      final hour = ticket.createdAt.hour;
-      final isHourMatch = hour >= startHour && hour <= endHour;
-      return isDateMatch && isHourMatch;
+      final z = TaipeiTime.toTaipei(ticket.createdAt);
+
+      if (!overnight) {
+        if (z.year != y || z.month != m || z.day != d) return false;
+        final h = z.hour;
+        return h >= startHour && h <= endHour;
+      }
+
+      final dayStart = tz.TZDateTime(loc, y, m, d);
+      final nextDay = dayStart.add(const Duration(days: 1));
+
+      final onEvening =
+          z.year == dayStart.year &&
+          z.month == dayStart.month &&
+          z.day == dayStart.day &&
+          z.hour >= startHour;
+      final onNextMorning =
+          z.year == nextDay.year &&
+          z.month == nextDay.month &&
+          z.day == nextDay.day &&
+          z.hour < endHour;
+
+      return onEvening || onNextMorning;
     }).toList();
   }
 
-  // Validate hour range
+  // Validate same-calendar-day hour range (custom mode)
   bool isValidHourRange(int startHour, int endHour) {
     return startHour >= 0 &&
         startHour <= 23 &&
@@ -221,11 +245,9 @@ class ExportService {
   // Get predefined hour ranges
   Map<String, Map<String, int>> getPredefinedHourRanges() {
     return {
-      'Morning (6am-12pm)': {'start': 6, 'end': 12},
-      'Afternoon (12pm-6pm)': {'start': 12, 'end': 18},
-      'Evening (6pm-10pm)': {'start': 18, 'end': 22},
-      'Full Day (6am-10pm)': {'start': 6, 'end': 22},
-      'Custom': {'start': -1, 'end': -1}, // User will specify
+      'Day shift (8am–4pm, Taipei)': {'start': 8, 'end': 16},
+      'Night shift (4pm–8am next day, Taipei)': {'start': 16, 'end': 8},
+      'Custom': {'start': -1, 'end': -1},
     };
   }
 }

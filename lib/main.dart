@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
 import 'config/supabase_config.dart';
 import 'config/app_theme.dart';
 import 'screens/splash_screen.dart';
-import 'screens/dashboard_screen.dart';
-import 'screens/scanner_screen.dart';
-import 'services/local_database_service.dart';
-import 'dart:async';
+import 'screens/admin_dashboard_screen.dart';
+import 'screens/reports_screen.dart';
+import 'screens/transactions_screen.dart';
+import 'screens/search_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  tzdata.initializeTimeZones();
 
   try {
     // Initialize Supabase
@@ -20,25 +22,7 @@ void main() async {
     );
     debugPrint('✓ Supabase initialized successfully');
 
-    // Initialize local database
-    debugPrint('Initializing local database...');
-    final localDb = LocalDatabaseService();
-    await localDb.initialize();
-    debugPrint('✓ Local database initialized successfully');
-
-    // Initial sync from Supabase
-    debugPrint('Starting initial sync from Supabase...');
-    try {
-      await localDb.syncFromSupabase(force: true);
-      final stats = await localDb.getCacheStats();
-      debugPrint(
-        '✓ Initial sync completed - ${stats['ticketCount']} tickets cached',
-      );
-    } catch (e) {
-      debugPrint('⚠ Initial sync failed (app will work offline): $e');
-    }
-
-    runApp(MyApp(localDb: localDb));
+    runApp(const MyApp());
   } catch (e, stackTrace) {
     debugPrint('✗ Fatal error during app initialization: $e');
     debugPrint('Stack trace: $stackTrace');
@@ -93,46 +77,8 @@ class ErrorApp extends StatelessWidget {
   }
 }
 
-class MyApp extends StatefulWidget {
-  final LocalDatabaseService localDb;
-
-  const MyApp({required this.localDb, super.key});
-
-  @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  late Timer _syncTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    // Set up periodic sync every 30 minutes
-    _syncTimer = Timer.periodic(const Duration(minutes: 30), (_) {
-      _performBackgroundSync();
-    });
-  }
-
-  @override
-  void dispose() {
-    _syncTimer.cancel();
-    super.dispose();
-  }
-
-  Future<void> _performBackgroundSync() async {
-    try {
-      debugPrint('[Background Sync] Starting...');
-      await widget.localDb.syncFromSupabase();
-      final stats = await widget.localDb.getCacheStats();
-      debugPrint(
-        '[Background Sync] ✓ Completed - ${stats['ticketCount']} tickets',
-      );
-    } catch (e) {
-      debugPrint('[Background Sync] ⚠ Failed: $e');
-      // Silent fail - app continues to work with existing cache
-    }
-  }
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +107,9 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = [
     const DashboardScreen(),
-    const ScannerScreen(),
+    const TransactionsScreen(),
+    const ReportsScreen(),
+    const SearchScreen(),
   ];
 
   @override
@@ -182,9 +130,19 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Dashboard',
           ),
           NavigationDestination(
-            icon: Icon(Icons.qr_code_scanner_outlined),
-            selectedIcon: Icon(Icons.qr_code_scanner),
-            label: 'Scanner',
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
+            label: 'Transactions',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.summarize_outlined),
+            selectedIcon: Icon(Icons.summarize),
+            label: 'Reports',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.search_outlined),
+            selectedIcon: Icon(Icons.search),
+            label: 'Search',
           ),
         ],
       ),

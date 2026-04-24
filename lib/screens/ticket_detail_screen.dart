@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/ticket_cache.dart';
+import '../utils/taipei_time.dart';
 
 class TicketDetailScreen extends StatelessWidget {
   final TicketCache ticket;
@@ -9,6 +10,8 @@ class TicketDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final visitTaipei = TaipeiTime.toTaipei(ticket.visitDate);
+    final createdTaipei = TaipeiTime.toTaipei(ticket.createdAt);
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
@@ -72,11 +75,11 @@ class TicketDetailScreen extends StatelessWidget {
               ),
               _buildDetailRow(
                 'Visit Date',
-                DateFormat('MMMM dd, yyyy').format(ticket.visitDate),
+                DateFormat('MMMM dd, yyyy').format(visitTaipei),
               ),
               _buildDetailRow(
                 'Visit Time',
-                DateFormat('hh:mm a').format(ticket.visitDate),
+                DateFormat('hh:mm a').format(visitTaipei),
               ),
             ]),
 
@@ -89,7 +92,7 @@ class TicketDetailScreen extends StatelessWidget {
                 _buildDetailRow('Reference Number', ticket.referenceNumber),
                 _buildDetailRow(
                   'Created At',
-                  DateFormat('MMM dd, yyyy hh:mm a').format(ticket.createdAt),
+                  DateFormat('MMM dd, yyyy hh:mm a').format(createdTaipei),
                 ),
                 _buildDetailRow(
                   'Status',

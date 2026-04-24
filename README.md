@@ -1,132 +1,92 @@
-# CTU Kiosk Mobile - Ticket Checker Application
+# CTU Kiosk Mobile Admin
 
-A Flutter-based ticket validation and monitoring application for CTU Kiosk system. This app provides **read-only** access to check ticket validity and view analytics.
+Flutter admin application for monitoring CTU kiosk activity directly from Supabase.
 
-## Features
+## Current Data Source
 
-- **QR Code Scanner**: Scan ticket QR codes for instant validation check
-- **Manual Reference Checker**: Input ticket reference numbers manually
-- **Expiry-Based Validation**: Automatically checks if tickets are still valid based on expiry date
-  - Tickets are validated when created in the system
-  - App checks validity by comparing current time with `date_expiry`
-  - No database modifications - read-only checker
-- **Dashboard Analytics**: 
-  - Payment summaries (Today, Week, Month)
-  - Visitor statistics
-  - Facility-wise breakdowns
-  - Interactive charts and visualizations
-- **Modern UI**: Clean, fast, and intuitive interface
+The active app flow now reads from the new Supabase project instead of the old local ticket cache.
 
-## Important Note
+Configured project:
 
-This app is a **read-only ticket checker**. It does not modify any data in the database. Tickets are validated and assigned expiry dates when they are created in the system. This app simply checks if a ticket is still within its valid period.
+- Supabase URL: `https://hahvllylxvdmdsdmtate.supabase.co`
+- Public key type: publishable key
 
-## Prerequisites
+## Active Table Mapping
 
-- Flutter SDK (3.9.2 or higher)
-- Dart SDK
-- Android Studio / VS Code
-- Supabase account and project
+- `transactions`
+  - Main completed transaction source
+  - Used by dashboard totals, recent transactions, transaction list, search, print status, and duration monitoring
+- `transaction_breakdown`
+  - Per-category quantity and subtotal rows
+  - Used by dashboard reporting and transaction details
+- `ticket_counters`
+  - Intended source for the counters screen
+  - If the table is not available in Supabase, the app derives counter values from recent transactions and marks them read-only
 
-## Database Setup
+The current Supabase project was verified to expose `transactions` and `transaction_breakdown`. The other planned admin tables are not currently reachable from the configured public key, so the app degrades safely where needed.
 
-Create a `tickets` table in your Supabase database with the following schema:
+## Main Screens
 
-```sql
-CREATE TABLE tickets (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  reference_number TEXT UNIQUE NOT NULL,
-  facility TEXT,
-  amount DECIMAL(10, 2),
-  visit_date TIMESTAMP WITH TIME ZONE,
-  is_valid BOOLEAN DEFAULT true,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+- Dashboard
+  - Sales, units, transaction counts, average duration, status summaries, recent transactions, and report charts
+- Transactions
+  - Filtered transaction list with search by ticket label, session ID, facility, or local transaction ID
+- Counters
+  - Displays per-facility counters and allows editing only when `ticket_counters` is available
+- Search / Reprint
+  - QR or manual lookup that opens full transaction details
 
--- Create index for faster lookups
-CREATE INDEX idx_tickets_reference ON tickets(reference_number);
-CREATE INDEX idx_tickets_visit_date ON tickets(visit_date);
-```
+## Transaction Details
 
-## Installation
+Each transaction detail page shows:
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd CTU-Kiosk-Mobile
-```
-
-2. Install dependencies:
-```bash
-flutter pub get
-```
-
-3. Configure Supabase credentials in `lib/config/supabase_config.dart` (already configured)
-
-4. Run the app:
-```bash
-flutter run
-```
+- Transaction ID and session ID
+- Facility code and facility name
+- Ticket label and range
+- Amount due and amount paid
+- Started/completed timestamps
+- Duration, payment status, print status, sync marker, and source mode
+- Full `transaction_breakdown` rows
 
 ## Project Structure
 
-```
+```text
 lib/
 ├── config/
-│   └── supabase_config.dart      # Supabase configuration
+│   └── supabase_config.dart
 ├── models/
-│   ├── ticket.dart                # Ticket data model
-│   └── dashboard_stats.dart       # Dashboard statistics model
+│   ├── admin_transaction.dart
+│   ├── dashboard_stats.dart
+│   ├── ticket_counter.dart
+│   └── transaction_breakdown_item.dart
 ├── screens/
-│   ├── dashboard_screen.dart      # Analytics dashboard
-│   └── scanner_screen.dart        # QR scanner & reference checker
+│   ├── admin_dashboard_screen.dart
+│   ├── counters_screen.dart
+│   ├── search_screen.dart
+│   ├── transaction_detail_screen.dart
+│   └── transactions_screen.dart
 ├── services/
-│   └── supabase_service.dart      # Database operations
-├── widgets/
-│   └── ticket_validation_dialog.dart  # Validation result dialog
-└── main.dart                      # App entry point
+│   └── supabase_service.dart
+├── utils/
+│   └── taipei_time.dart
+└── widgets/
+    └── sync_status_widget.dart
 ```
 
-## Usage
+## Development Notes
 
-### Scanner Tab
-1. Point camera at QR code to scan automatically
-2. Or manually enter reference number in the text field
-3. View validation results with ticket details
-4. Check expiry status:
-   - **Valid**: Green checkmark + time remaining (e.g., "Valid for 2 more days")
-   - **Expired**: Red X + time since expiry (e.g., "Expired 3 hours ago")
-   - **Invalid**: Red X for tickets with invalid status
+- The old local cache path is no longer used by the active app flow.
+- `local_database_service.dart` remains only as a compatibility adapter for legacy imports.
+- Time displays use the shared UTC+8 helper already present in the project.
 
-### Dashboard Tab
-1. View real-time payment and visitor statistics
-2. Analyze data by time periods (Today, Week, Month)
-3. See facility-wise breakdowns in charts
-4. Pull down to refresh data
+## Running
 
-**Note**: All operations are read-only. The app does not modify any ticket data.
-
-## Dependencies
-
-- `supabase_flutter`: Database integration
-- `mobile_scanner`: QR code scanning
-- `fl_chart`: Data visualization
-- `google_fonts`: Typography
-- `intl`: Date/number formatting
-- `permission_handler`: Camera permissions
-
-## Building for Production
-
-### Android
 ```bash
-flutter build apk --release
+flutter pub get
+flutter run
 ```
 
-### iOS
-```bash
-flutter build ios --release
-```
+## Validation Status
 
-## License
-
-This project is part of a capstone project for CTU.
+- Dart analysis: clean
+- Widget test execution: blocked by local Flutter CLI path configuration in this workspace

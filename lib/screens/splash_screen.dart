@@ -8,15 +8,17 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
+  Timer? _navigationTimer;
 
   @override
   void initState() {
     super.initState();
-    
+
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1500),
       vsync: this,
@@ -39,7 +41,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     _controller.forward();
 
     // Navigate to main screen after delay
-    Timer(const Duration(seconds: 3), () {
+    _navigationTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/main');
       }
@@ -48,6 +50,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
   @override
   void dispose() {
+    _navigationTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -73,7 +76,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Spacer(flex: 2),
-                
+
                 // Animated Logo
                 AnimatedBuilder(
                   animation: _controller,
@@ -106,9 +109,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     );
                   },
                 ),
-                
+
                 const SizedBox(height: 40),
-                
+
                 // App Title
                 AnimatedBuilder(
                   animation: _fadeAnimation,
@@ -148,9 +151,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     );
                   },
                 ),
-                
+
                 const Spacer(flex: 2),
-                
+
                 // Loading Indicator
                 AnimatedBuilder(
                   animation: _fadeAnimation,
@@ -183,7 +186,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     );
                   },
                 ),
-                
+
                 const SizedBox(height: 60),
               ],
             ),
